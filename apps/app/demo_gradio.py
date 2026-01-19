@@ -87,17 +87,17 @@ def format_agent_activity(steps: List[AgentStep]) -> str:
         if is_completed:
             indicator = '''<div style="
                 width: 20px; height: 20px; border-radius: 50%;
-                background: #4CAF50; color: white;
+                background: #4a9d7c; color: white;
                 display: flex; align-items: center; justify-content: center;
                 font-size: 12px; flex-shrink: 0;
             ">✓</div>'''
         elif is_running:
             indicator = '''<div style="
                 width: 20px; height: 20px; border-radius: 50%;
-                border: 2px solid #4CAF50; background: white;
+                border: 2px solid #4a9d7c; background: white;
                 display: flex; align-items: center; justify-content: center;
                 flex-shrink: 0;
-            "><div style="width: 8px; height: 8px; border-radius: 50%; background: #4CAF50;"></div></div>'''
+            "><div style="width: 8px; height: 8px; border-radius: 50%; background: #4a9d7c;"></div></div>'''
         else:
             indicator = '''<div style="
                 width: 20px; height: 20px; border-radius: 50%;
@@ -117,7 +117,7 @@ def format_agent_activity(steps: List[AgentStep]) -> str:
         
         # Connector line (except for last item)
         if i < len(steps) - 1:
-            line_color = "#4CAF50" if is_completed else "#e0e0e0"
+            line_color = "#4a9d7c" if is_completed else "#e0e0e0"
             html += f'''
             <div style="
                 width: 2px; height: 24px;
@@ -153,42 +153,20 @@ def format_cost_display(steps: List[AgentStep]) -> str:
     '''
 
 def format_molecules_table(molecules: List[MoleculeHit]) -> str:
-    """Format molecules as clean table matching mockup"""
+    """Format molecules as markdown table for Gradio chat"""
     if not molecules:
         return ""
     
-    html = '''
-    <div style="
-        background: white;
-        border-radius: 8px;
-        overflow: hidden;
-        border: 1px solid #eee;
-    ">
-        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-            <thead>
-                <tr style="background: #fafafa;">
-                    <th style="padding: 12px; text-align: left; font-weight: 500; color: #666; border-bottom: 1px solid #eee;">Structure</th>
-                    <th style="padding: 12px; text-align: left; font-weight: 500; color: #666; border-bottom: 1px solid #eee;">IC₅₀ (nM)</th>
-                    <th style="padding: 12px; text-align: left; font-weight: 500; color: #666; border-bottom: 1px solid #eee;">ClogP</th>
-                    <th style="padding: 12px; text-align: left; font-weight: 500; color: #666; border-bottom: 1px solid #eee;">Notes</th>
-                </tr>
-            </thead>
-            <tbody>
-    '''
+    # Use markdown table format that Gradio can render
+    md = "| Structure | IC₅₀ (nM) | ClogP | Notes |\n"
+    md += "|-----------|-----------|-------|-------|\n"
     
     for mol in molecules:
-        svg = render_molecule_svg(mol.smiles)
-        html += f'''
-        <tr>
-            <td style="padding: 8px 12px; border-bottom: 1px solid #f5f5f5; vertical-align: middle;">{svg}</td>
-            <td style="padding: 8px 12px; border-bottom: 1px solid #f5f5f5; font-family: monospace; color: #333;">{mol.ic50_nm}</td>
-            <td style="padding: 8px 12px; border-bottom: 1px solid #f5f5f5; font-family: monospace; color: #333;">{mol.clogp}</td>
-            <td style="padding: 8px 12px; border-bottom: 1px solid #f5f5f5; color: #666;">{mol.notes}</td>
-        </tr>
-        '''
+        # Truncate SMILES for display
+        smiles_short = mol.smiles[:20] + "..." if len(mol.smiles) > 20 else mol.smiles
+        md += f"| `{smiles_short}` | {mol.ic50_nm} | {mol.clogp} | {mol.notes} |\n"
     
-    html += '</tbody></table></div>'
-    return html
+    return md
 
 # ============================================================================
 # Follow-up Question Generation
@@ -223,31 +201,16 @@ def get_follow_up_suggestions(query: str) -> List[str]:
     else:
         return FOLLOW_UP_TEMPLATES["default"]
 
+def format_action_buttons() -> str:
+    """Format action buttons as markdown text"""
+    return "**Actions:** `Refine search` · `Run ADME` · `Open SAR view`"
+
 def format_follow_up_buttons(suggestions: List[str]) -> str:
-    """Format follow-up suggestions as clickable buttons"""
+    """Format follow-up suggestions as markdown"""
     if not suggestions:
         return ""
-    
-    buttons_html = '<div style="display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 0;">'
-    for suggestion in suggestions:
-        buttons_html += f'''
-        <button onclick="document.querySelector('textarea').value='{suggestion}'; document.querySelector('textarea').dispatchEvent(new Event('input', {{ bubbles: true }}));" 
-            style="
-                background: #f0f7f0; 
-                border: 1px solid #c8e6c9; 
-                border-radius: 16px;
-                padding: 8px 14px; 
-                font-size: 12px; 
-                color: #2e7d32; 
-                cursor: pointer;
-                transition: all 0.2s;
-            "
-            onmouseover="this.style.background='#e8f5e9'; this.style.borderColor='#4CAF50';"
-            onmouseout="this.style.background='#f0f7f0'; this.style.borderColor='#c8e6c9';"
-        >{suggestion}</button>
-        '''
-    buttons_html += '</div>'
-    return buttons_html
+    suggestions_text = " · ".join([f"_{s}_" for s in suggestions])
+    return f"\n**Try:** {suggestions_text}"
 
 # ============================================================================
 # Agent Simulation
@@ -283,32 +246,23 @@ def simulate_agent_orchestration(query: str, history: list) -> Generator:
         steps[-1].result = result
         yield history + [msg("user", query), msg("assistant", f"✅ {agent_name}: {result}")], format_agent_activity(steps), format_cost_display(steps), "", ""
     
-    # Generate results HTML (rendered separately, not in chat)
-    molecules_html = format_molecules_table(SAMPLE_MOLECULES)
+    # Generate results as markdown for chat
+    molecules_md = format_molecules_table(SAMPLE_MOLECULES)
+    action_buttons_md = format_action_buttons()
     follow_ups = get_follow_up_suggestions(query)
-    follow_up_html = format_follow_up_buttons(follow_ups)
+    follow_up_md = format_follow_up_buttons(follow_ups)
     
-    # Combine results and follow-ups for the results panel
-    results_panel = f"""
-    <div style="margin-bottom: 12px;">
-        <div style="font-size: 13px; font-weight: 500; color: #333; margin-bottom: 8px;">
-            📊 Found {len(SAMPLE_MOLECULES)} candidates
-        </div>
-        {molecules_html}
-    </div>
-    {follow_up_html}
-    """
-    
-    # Chat just shows text summary
-    final_response = f"""✅ **Analysis complete!**
+    # Include results directly in the chat message
+    final_response = f"""✅ **Found {len(SAMPLE_MOLECULES)} candidates**
 
-Found **{len(SAMPLE_MOLECULES)} candidates** matching: *{query}*
+{molecules_md}
 
-Results displayed below ↓"""
+{action_buttons_md}
+{follow_up_md}"""
 
     final_history = history + [msg("user", query), msg("assistant", final_response)]
     
-    yield final_history, format_agent_activity(steps), format_cost_display(steps), results_panel, ""
+    yield final_history, format_agent_activity(steps), format_cost_display(steps), "", ""
 
 # ============================================================================
 # Custom CSS
@@ -335,43 +289,32 @@ custom_css = """
     margin: 8px !important;
 }
 
-/* Project button styling */
-.project-btn {
-    border-radius: 8px !important;
-    margin-bottom: 4px !important;
-    font-weight: 500 !important;
+/* User bubbles - teal/sage green matching mockup */
+.bubble-wrap.user .bubble,
+.message-wrap .message.user,
+[data-testid="user"] {
+    background: #4a9d7c !important;
+    color: white !important;
+    border-radius: 18px !important;
 }
 
-.project-btn.selected {
-    background: #e8f5e9 !important;
-    border-left: 3px solid #4CAF50 !important;
-}
-
-/* Green accent buttons */
+/* Teal accent buttons */
 .gr-button-primary {
-    background: #4CAF50 !important;
+    background: #4a9d7c !important;
     border: none !important;
+    color: white !important;
+    border-radius: 8px !important;
+    transition: all 0.2s ease !important;
+}
+
+.gr-button-primary:hover {
+    background: #3d8a6a !important;
 }
 
 /* Clean input styling */
 .gr-textbox {
     border-radius: 24px !important;
     border: 1px solid #e0e0e0 !important;
-}
-
-/* Action button pills */
-.action-pill {
-    background: #f5f5f5 !important;
-    border: none !important;
-    border-radius: 20px !important;
-    padding: 8px 16px !important;
-    font-size: 13px !important;
-    color: #666 !important;
-}
-
-.action-pill:hover {
-    background: #e8f5e9 !important;
-    color: #4CAF50 !important;
 }
 
 /* Hide footer */
@@ -383,7 +326,14 @@ footer { display: none !important; }
 # ============================================================================
 
 def create_app():
-    with gr.Blocks(title="AiChemy", css=custom_css) as app:
+    # Custom theme with teal/sage accents
+    theme = gr.themes.Soft(
+        primary_hue=gr.themes.colors.teal,
+        secondary_hue=gr.themes.colors.gray,
+        neutral_hue=gr.themes.colors.gray,
+    )
+    
+    with gr.Blocks(title="AiChemy", css=custom_css, theme=theme) as app:
         
         # Main container with 3 columns
         with gr.Row(equal_height=False):
@@ -404,7 +354,7 @@ def create_app():
                     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 24px;">
                         <div style="
                             width: 32px; height: 32px;
-                            background: linear-gradient(135deg, #4CAF50, #2E7D32);
+                            background: #4a9d7c;
                             border-radius: 8px;
                             display: flex; align-items: center; justify-content: center;
                             color: white; font-size: 16px;
@@ -414,14 +364,14 @@ def create_app():
                     
                     <!-- Projects -->
                     <div style="
-                        background: #e8f5e9;
+                        background: #e6f4ef;
                         border-radius: 8px;
                         padding: 10px 12px;
                         margin-bottom: 8px;
                         display: flex;
                         align-items: center;
                         gap: 8px;
-                        border-left: 3px solid #4CAF50;
+                        border-left: 3px solid #4a9d7c;
                         cursor: pointer;
                     ">
                         <span>🧬</span>
