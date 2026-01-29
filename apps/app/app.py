@@ -126,7 +126,7 @@ agents = [
 ]
 
 # Load tools from tab-delimited file
-df_tools = pd.read_csv("tools.txt", sep="\t")
+df_tools = pd.read_csv(f"{app_root}/tools.txt", sep="\t")
 TOOLS = list(df_tools.itertuples(index=False, name=None))
 
 # ============================================================================
