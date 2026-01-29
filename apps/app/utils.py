@@ -43,7 +43,7 @@ def ask_agent_mlflowclient(input_dict: dict, client) -> dict:
     # returns response.json()
     return client.predict(endpoint=os.getenv("SERVING_ENDPOINT"), inputs=input_dict)
 
-
+  
 def extract_text_content(response_json):
     # Extract text content from the response (equivalent to jq extraction)
     # jq -r '.output[] | select(.type == "message") | .content[] | .text'
@@ -137,4 +137,24 @@ def strip_tool_call_tags(text_content):
     
     return text_content
 
+
+def extract_tokens_from_spans(response_json: dict):
+    """Recursively extract tokens from spans and stream to file"""
+    spans = response_json.get('databricks_output', {}).get('trace', {}).get('data', {}).get('spans', [])
+
+    global token_count
+    for span in spans:
+        if 'events' in span and span['events']:
+            for event in span['events']:
+                if 'attributes' in event and 'token' in event['attributes']:
+                    token = event['attributes']['token']
+                    tokens.append(token)
+                    token_count += 1
+                    
+                    # Write token immediately to file
+                    output_file.write(f"{token_count}. {token}\n")
+                    output_file.flush()
+                    
+                    # Print to console
+                    print(f"{token_count}. {repr(token)}")
 
