@@ -3,6 +3,7 @@ import requests
 import json
 import streamlit as st
 from databricks.sdk import WorkspaceClient
+import base64
 
 
 def get_user_info():
@@ -137,22 +138,3 @@ def strip_tool_call_tags(text_content):
     return text_content
 
 
-def extract_tokens_from_spans(response_json: dict):
-    """Recursively extract tokens from spans and stream to file"""
-    spans = response_json.get('databricks_output', {}).get('trace', {}).get('data', {}).get('spans', [])
-
-    global token_count
-    for span in spans:
-        if 'events' in span and span['events']:
-            for event in span['events']:
-                if 'attributes' in event and 'token' in event['attributes']:
-                    token = event['attributes']['token']
-                    tokens.append(token)
-                    token_count += 1
-                    
-                    # Write token immediately to file
-                    output_file.write(f"{token_count}. {token}\n")
-                    output_file.flush()
-                    
-                    # Print to console
-                    print(f"{token_count}. {repr(token)}")
