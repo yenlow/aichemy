@@ -259,6 +259,7 @@ with col_chat:
             st.session_state.thread_id = str(uuid4())
             st.session_state.messages = []
             st.session_state.tool_calls = []
+            st.session_state.genie = []
             st.session_state.workflow = None
             st.session_state.is_processing = False
             st.session_state.last_processed_input = None            
