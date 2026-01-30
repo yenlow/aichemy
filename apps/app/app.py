@@ -178,7 +178,7 @@ def stop_processing():
 # ============================================================================
 
 with st.sidebar:
-    st.logo("logo.svg", size="large", link=None)
+    st.logo(f"{app_root}/logo.svg", size="large", link=None)
     st.markdown(
         """
     <div style="background: #e6f4ef; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;
@@ -366,9 +366,8 @@ with col_chat:
                         input_dict, client=client
                     )  # returns response.json()
                     # Write response to file
-                    with open("response_json.txt", "w") as f:
-                        f.write(pformat(response_json, width=120))
-                        
+                    # with open("response_json.txt", "w") as f:
+                    #     f.write(pformat(response_json, width=120))
                     text_contents = extract_text_content(response_json)
                     genie_results = parse_genie_results(response_json)
                     if len(text_contents) > 0:
