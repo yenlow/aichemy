@@ -4,6 +4,10 @@ import json
 import streamlit as st
 from databricks.sdk import WorkspaceClient
 import base64
+from pathlib import Path
+from typing import Optional
+import yaml
+import re
 
 
 def get_user_info():
@@ -181,3 +185,282 @@ def parse_genie_results(response_json):
             except json.JSONDecodeError:
                 continue 
     return results
+
+
+# ============================================================================
+# Skill Loading Utilities
+# ============================================================================
+
+def get_skills_directory() -> Path:
+    """
+    Get the path to the skills directory.
+    
+    Returns:
+        Path: Path to the skills directory
+    """
+    # Navigate from app folder to project root, then to skills
+    app_root = Path(__file__).resolve().parent
+    project_root = app_root.parent.parent
+    return project_root / "skills"
+
+
+def parse_skill_frontmatter(content: str) -> dict:
+    """
+    Parse YAML frontmatter from a SKILL.md file.
+    
+    Expected format:
+    ---
+    name: skill-name
+    description: Skill description text
+    ---
+    
+    Args:
+        content: The full content of the SKILL.md file
+    
+    Returns:
+        dict: Parsed frontmatter with 'name' and 'description' keys
+    """
+    frontmatter = {}
+    
+    # Match YAML frontmatter between --- delimiters
+    frontmatter_pattern = r'^---\s*\n(.*?)\n---\s*\n'
+    match = re.match(frontmatter_pattern, content, re.DOTALL)
+    
+    if match:
+        try:
+            frontmatter = yaml.safe_load(match.group(1))
+        except yaml.YAMLError:
+            pass
+    
+    return frontmatter or {}
+
+
+def discover_skills() -> list[dict]:
+    """
+    Discover all available skills from the skills directory.
+    
+    Scans the skills directory for subdirectories containing SKILL.md files,
+    parses their frontmatter, and returns a list of skill metadata.
+    
+    Returns:
+        list: List of dicts with keys:
+              - 'id': Directory name (e.g., 'target-identification')
+              - 'name': Display name from frontmatter
+              - 'description': Description from frontmatter
+              - 'path': Full path to the skill directory
+    """
+    skills_dir = get_skills_directory()
+    skills = []
+    
+    if not skills_dir.exists():
+        return skills
+    
+    for skill_folder in skills_dir.iterdir():
+        if skill_folder.is_dir():
+            skill_file = skill_folder / "SKILL.md"
+            if skill_file.exists():
+                try:
+                    content = skill_file.read_text(encoding='utf-8')
+                    frontmatter = parse_skill_frontmatter(content)
+                    
+                    skill_info = {
+                        'id': skill_folder.name,
+                        'name': frontmatter.get('name', skill_folder.name),
+                        'description': frontmatter.get('description', ''),
+                        'path': str(skill_folder)
+                    }
+                    skills.append(skill_info)
+                except Exception:
+                    # Skip skills that can't be parsed
+                    continue
+    
+    return skills
+
+
+def load_skill_content(skill_id: str) -> Optional[dict]:
+    """
+    Load the full content of a skill including the main SKILL.md and any reference files.
+    
+    Args:
+        skill_id: The skill directory name (e.g., 'target-identification')
+    
+    Returns:
+        dict: Dictionary containing:
+              - 'frontmatter': Parsed YAML frontmatter
+              - 'content': Full markdown content (without frontmatter)
+              - 'references': Dict mapping reference filenames to their content
+              - 'full_prompt': Combined prompt ready for injection
+        None: If skill not found or cannot be loaded
+    """
+    skills_dir = get_skills_directory()
+    skill_path = skills_dir / skill_id
+    skill_file = skill_path / "SKILL.md"
+    
+    if not skill_file.exists():
+        return None
+    
+    try:
+        full_content = skill_file.read_text(encoding='utf-8')
+        
+        # Parse frontmatter
+        frontmatter = parse_skill_frontmatter(full_content)
+        
+        # Extract content without frontmatter
+        content_pattern = r'^---\s*\n.*?\n---\s*\n(.*)$'
+        match = re.match(content_pattern, full_content, re.DOTALL)
+        content = match.group(1).strip() if match else full_content
+        
+        # Load reference files
+        references = {}
+        references_dir = skill_path / "references"
+        if references_dir.exists():
+            for ref_file in references_dir.iterdir():
+                if ref_file.is_file() and ref_file.suffix == '.md':
+                    try:
+                        references[ref_file.name] = ref_file.read_text(encoding='utf-8')
+                    except Exception:
+                        continue
+        
+        # Build full prompt with references appended
+        full_prompt = f"# Skill: {frontmatter.get('name', skill_id)}\n\n"
+        full_prompt += content
+        
+        if references:
+            full_prompt += "\n\n---\n\n## Reference Materials\n\n"
+            for ref_name, ref_content in references.items():
+                full_prompt += f"### {ref_name}\n\n{ref_content}\n\n"
+        
+        return {
+            'frontmatter': frontmatter,
+            'content': content,
+            'references': references,
+            'full_prompt': full_prompt
+        }
+    
+    except Exception:
+        return None
+
+
+def get_skill_names_for_selector() -> tuple[list[str], list[str]]:
+    """
+    Get skill names and descriptions formatted for use in a Streamlit radio selector.
+    
+    Returns:
+        tuple: (list of display names, list of caption descriptions)
+    """
+    skills = discover_skills()
+    
+    names = []
+    captions = []
+    
+    for skill in skills:
+        # Create display name with emoji based on skill type
+        name = skill['name']
+        if 'target' in name.lower():
+            display_name = f"🎯 {name.replace('-', ' ').title()}"
+        elif 'hit' in name.lower():
+            display_name = f"⌬ {name.replace('-', ' ').title()}"
+        elif 'lead' in name.lower():
+            display_name = f"🧪 {name.replace('-', ' ').title()}"
+        elif 'safety' in name.lower():
+            display_name = f"☠️ {name.replace('-', ' ').title()}"
+        else:
+            display_name = f"📋 {name.replace('-', ' ').title()}"
+        
+        names.append(display_name)
+        
+        # Truncate description for caption if too long
+        desc = skill['description']
+        if len(desc) > 100:
+            desc = desc[:97] + "..."
+        captions.append(desc)
+    
+    return names, captions
+
+
+def get_skill_id_from_display_name(display_name: Optional[str], available_skill_names: Optional[list[str]] = None) -> Optional[str]:
+    """
+    Map a display name back to the skill ID.
+    
+    Args:
+        display_name: The formatted display name from the selector (e.g., "🎯 Druggable Targets")
+        available_skill_names: Optional list of skill display names to check membership
+    
+    Returns:
+        str: The skill ID, or None if not found or not a dynamic skill
+    """
+    if not display_name:
+        return None
+    
+    # If available_skill_names provided, check if this is actually a dynamic skill
+    if available_skill_names and display_name not in available_skill_names:
+        # Not a dynamic skill (might be a hardcoded workflow), return the display_name as-is
+        return display_name
+    
+    # Extract the core name by removing emoji prefix
+    core_name = display_name.split(' ', 1)[-1].lower().replace(' ', '-') if ' ' in display_name else display_name.lower()
+    
+    # Look up against discovered skills
+    skills = discover_skills()
+    for skill in skills:
+        if skill['name'].lower() == core_name or skill['id'].lower() == core_name:
+            return skill['id']
+    
+    # If not found in skills, return the original display_name (for hardcoded workflows)
+    return display_name
+
+
+def build_prompt_with_skill(user_query: str, skill_id: Optional[str] = None) -> str:
+    """
+    Build a prompt that includes skill instructions if a skill is selected.
+    
+    Args:
+        user_query: The user's original query
+        skill_id: Optional skill ID to load and prepend
+    
+    Returns:
+        str: The combined prompt with skill instructions (if applicable)
+    """
+    if not skill_id:
+        return user_query
+    
+    skill_data = load_skill_content(skill_id)
+    if not skill_data:
+        return user_query
+    
+    # Build prompt with skill context
+    prompt = f"""You have been given a specialized skill to help with this task. Follow the workflow instructions carefully.
+
+<skill_instructions>
+{skill_data['full_prompt']}
+</skill_instructions>
+
+<user_request>
+{user_query}
+</user_request>
+
+Execute the skill workflow to address the user's request. Follow each step methodically and provide the expected output format."""
+    
+    return prompt
+
+
+def extract_user_request(prompt: str) -> str:
+    """
+    Extract the user query from between <user_request> tags.
+    
+    If the prompt contains <user_request> tags, extracts and returns only the 
+    content between them. Otherwise, returns the original prompt unchanged.
+    
+    Args:
+        prompt: The full prompt, potentially containing <user_request> tags
+    
+    Returns:
+        str: The extracted user request, or the original prompt if no tags found
+    """
+    pattern = r'<user_request>\s*(.*?)\s*</user_request>'
+    match = re.search(pattern, prompt, re.DOTALL)
+    
+    if match:
+        return match.group(1).strip()
+    
+    return prompt
