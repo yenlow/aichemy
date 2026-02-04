@@ -1,7 +1,20 @@
 import logging
 import streamlit as st
 from mlflow.deployments import get_deploy_client
-from utils import get_user_info, ask_agent_mlflowclient, extract_text_content, parse_tool_calls, strip_tool_call_tags, parse_genie_results
+from utils import (
+    get_user_info, 
+    ask_agent_mlflowclient, 
+    extract_text_content, 
+    parse_tool_calls, 
+    strip_tool_call_tags, 
+    parse_genie_results,
+    discover_skills,
+    get_skill_names_for_selector,
+    get_skill_id_from_display_name,
+    load_skill_content,
+    build_prompt_with_skill,
+    extract_user_request
+)
 from uuid import uuid4
 from pprint import pformat
 import time
@@ -91,14 +104,14 @@ EXAMPLE_QUESTIONS = [
 ]
 
 WORKFLOWS = [
-    "🧬 Target identification", 
+#    "🧬 Target identification", 
     "⌬ Hit identification", 
     "🧪 Lead optimization", 
     "☠️ Safety assessment"
 ]
 
 workflow_captions = [
-    "Based on a disease, get its associated targets", 
+#    "Based on a disease, get its associated targets", 
     "Based on a target, get its associated drugs", 
     "Based on a compound, get its properties", 
     "Based on a compound, get its safety info"
@@ -150,6 +163,8 @@ if "last_processed_input" not in st.session_state:
     st.session_state.last_processed_input = None
 if "stop" not in st.session_state:
     st.session_state.stop = False
+if "response_count" not in st.session_state:
+    st.session_state.response_count = 0
 if "prompts_w_tools" not in st.session_state:
     st.session_state.prompts_w_tools = []
 if "prompts_w_genie" not in st.session_state:
@@ -194,16 +209,22 @@ with st.sidebar:
 
     st.divider()
 
-    # Workflow selector
-    st.markdown("**Guided workflows**")
+    # Skills selector - dynamically loaded from skills folder
+    st.markdown("**Skills Available**")
+    skill_names, skill_captions = get_skill_names_for_selector()
+    
+    # Combine hardcoded workflows with dynamic skills for backward compatibility
+    all_skills = skill_names + WORKFLOWS
+    all_captions = skill_captions + workflow_captions
+    
     st.session_state.workflow = st.radio(
-        "", WORKFLOWS, index=None, captions=workflow_captions, label_visibility="collapsed"
+        "", all_skills, index=None, captions=all_captions, label_visibility="collapsed"
     )
 
     st.divider()
 
     # Available tools 
-    st.markdown("**Available tools**")
+    st.markdown("**Tools Available**")
     opentargets_expander = st.expander("🎯OpenTargets MCP", expanded=False)
     pubchem_expander = st.expander("🧪 PubChem MCP", expanded=False)        
     utils_expander = st.expander("🛠️ Chem Utilities", expanded=False)
@@ -265,10 +286,11 @@ with col_chat:
             st.session_state.last_processed_input = None            
             st.session_state.stop = False
             st.session_state.prompts_w_tools = []
-            st.session_state.prompts_w_genie = [] 
+            st.session_state.prompts_w_genie = []
+            st.session_state.response_count = 0
             st.rerun()
 
-    if st.session_state.workflow == WORKFLOWS[0]:
+    if st.session_state.workflow == all_skills[0]:
         # Show text input for disease of interest
         col1, col2 = st.columns([7, 1])
         with col1:
@@ -276,13 +298,16 @@ with col_chat:
                 "Enter the disease of interest", key="workflow_input", placeholder="e.g., breast cancer, Alzheimer's disease"
             ):
                 input_key = f"disease:{disease_input}"
-                prompt = f"Use OpenTargets to find targets associated with {st.session_state.workflow_input}. Show their scores if any and rank in descending order of scores."
+                user_query = f"Find targets associated with {st.session_state.workflow_input}."
+                skill_id = get_skill_id_from_display_name(st.session_state.workflow, skill_names)
+                prompt = build_prompt_with_skill(user_query, skill_id)
+
 
         with col2:# Align with input
             st.button("Clear", key="clear_disease", icon=":material/clear:", on_click=clear_workflow)
 
 
-    elif st.session_state.workflow == WORKFLOWS[1]:
+    elif st.session_state.workflow == all_skills[1]:
         # Show text input for target of interest
         col1, col2 = st.columns([7, 1])
         with col1:
@@ -293,7 +318,7 @@ with col_chat:
             st.button("Clear", key="clear_target", icon=":material/clear:", on_click=clear_workflow)
 
 
-    elif st.session_state.workflow == WORKFLOWS[2]:
+    elif st.session_state.workflow == all_skills[2]:
         # Show text input for compound of interest
         col1, col2 = st.columns([5, 1])
         with col1:
@@ -313,7 +338,7 @@ with col_chat:
         with col2:
             st.button("Clear", key="clear_compound", icon=":material/clear:", on_click=clear_workflow)
 
-    elif st.session_state.workflow == WORKFLOWS[3]:
+    elif st.session_state.workflow == all_skills[3]:
         # Show text input for target of interest
         col1, col2 = st.columns([7, 1])
         with col1:
@@ -340,17 +365,19 @@ with col_chat:
         # Mark this input as processed
         st.session_state.last_processed_input = input_key
         with st.chat_message("user"):
-            st.markdown(prompt)
+            st.markdown(extract_user_request(prompt))
 
-        input_dict = {
+        input_dict_w_skill = {
             "input": [{"role": "user", "content": prompt}],
             "custom_inputs": {"thread_id": st.session_state.thread_id},
             "databricks_options": {"return_trace": True}
         }
+        input_dict = input_dict_w_skill.copy()
+        input_dict["input"] = [{"role": "user", "content": extract_user_request(prompt)}]
 
         # Append query to messages
         st.session_state.messages.append(input_dict)
-        print(f"Last msg:{pformat(input_dict, width=120)}")
+        print(f"Last msg:{pformat(input_dict_w_skill, width=120)}")
     
         # Check if we need to actually make the API call
         # (last message should be a user message without a corresponding assistant response)
@@ -363,20 +390,24 @@ with col_chat:
                 if st.session_state.is_processing and not st.session_state.stop:
                     # Query the agent endpoint
                     response_json = ask_agent_mlflowclient(
-                        input_dict, client=client
+                        input_dict_w_skill, client=client
                     )  # returns response.json()
                     # Write response to file
-                    # with open("response_json.txt", "w") as f:
-                    #     f.write(pformat(response_json, width=120))
+                    with open("response_json.txt", "w") as f:
+                        f.write(pformat(response_json, width=120))
                     text_contents = extract_text_content(response_json)
                     genie_results = parse_genie_results(response_json)
-                    if len(text_contents) > 0:
+                    
+                    # Only process new responses (skip previously seen ones)
+                    prev_count = st.session_state.response_count
+                    new_contents = text_contents[prev_count:]
+                    st.session_state.response_count = len(text_contents)
+                    
+                    if len(new_contents) > 0:
                         # Parse tool calls from the text content
                         all_tool_calls = []
                         cleaned_texts = []
-                        # agent keeps appending according to thread_id so just get the last one
-                        response_list = [text_contents[-1]]
-                        for text_content in response_list:
+                        for text_content in new_contents:
                             tool_calls = parse_tool_calls(text_content)
                             all_tool_calls.extend(tool_calls)
                             # Strip tool call tags from the text
@@ -385,15 +416,15 @@ with col_chat:
                                 cleaned_texts.append(cleaned_text)
                         if len(all_tool_calls) > 0:
                             st.session_state.tool_calls.append(all_tool_calls)
-                            st.session_state.prompts_w_tools.append(prompt)
+                            st.session_state.prompts_w_tools.append(extract_user_request(prompt))
                         if len(genie_results) > 0:
                             st.session_state.genie.append(genie_results)
-                            st.session_state.prompts_w_genie.append(prompt)
+                            st.session_state.prompts_w_genie.append(extract_user_request(prompt))
                         # Join cleaned text contents
                         assistant_response = "\n\n".join(cleaned_texts) if cleaned_texts else ""
                     else:
                         assistant_response = "No response. Retry or reset the chat."
-                    # print(assistant_response)
+                    print(assistant_response)
                     # Append answer to messages
                     st.session_state.messages.append(
                         {
