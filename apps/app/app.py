@@ -103,7 +103,7 @@ df_tools = pd.read_csv(f"{app_root}/tools.txt", sep="\t")
 TOOLS = list(df_tools.itertuples(index=False, name=None))
 
 # Load skills from skills folder
-skills_dir = os.environ.get("SKILLS_DIR") or get_skills_directory()
+skills_dir = app_root / "skills"
 SKILLS_METADATA = discover_skills(skills_dir)
 
 # Sort skills by order key
@@ -166,7 +166,7 @@ def stop_processing():
 # ============================================================================
 
 with st.sidebar:
-    st.image(f"{app_root}/logo.svg", width=200)
+    st.image(f"{app_root}/logo.svg", width=150)
     st.markdown(
         """
     <div style="background: #e6f4ef; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;
@@ -277,11 +277,11 @@ with col_chat:
                 "Enter the disease of interest", key="workflow_input", placeholder="e.g., breast cancer, Alzheimer's disease"
             ):
                 input_key = f"disease:{disease_input}"
-                user_query = f"Use OpenTargets and optionally PubChem to find targets associated with {st.session_state.workflow_input}."
+                user_query = f"Find targets associated with {st.session_state.workflow_input}."
                 if st.session_state.skills_enabled:
-                    prompt = build_prompt_with_skill(user_query, 'target-identification')
+                    prompt = build_prompt_with_skill(user_query, 'target-identification', skills_dir)
                 else:
-                    prompt = user_query
+                    prompt = f"Use OpenTargets and optionally PubChem to {user_query}"
         with col2:# Align with input
             st.button("Clear", key="clear_disease", icon=":material/clear:", on_click=clear_workflow)
 
@@ -292,36 +292,37 @@ with col_chat:
         with col1:
             if target_input := st.text_input("Enter the target of interest", key="workflow_input", placeholder="e.g., BRCA1, GLP-1"):
                 input_key = f"target:{target_input}"
-                user_query = f"Use OpenTargets to find drugs associated with {st.session_state.workflow_input}. Show their scores if any and rank in descending order of scores."
+                user_query = f"Find drugs associated with {st.session_state.workflow_input}."
                 if st.session_state.skills_enabled:
-                    prompt = build_prompt_with_skill(user_query, 'hit-identification')
+                    prompt = build_prompt_with_skill(user_query, 'hit-identification', skills_dir)
                 else:
-                    prompt = user_query
+                    prompt = f"Use OpenTargets to {user_query} Show their scores if any and rank in descending order of scores."
         with col2:
             st.button("Clear", key="clear_target", icon=":material/clear:", on_click=clear_workflow)
 
 
     elif st.session_state.workflow == SKILLS_METADATA.get('ADME-assessment').get('label'):
         # Show text input for compound of interest
-        col1, col2 = st.columns([5, 1])
+        col1, col2 = st.columns([7, 1])
         with col1:
             if compound_input := st.text_input(
                 "Enter the compound of interest", key="workflow_input", placeholder="e.g., acetaminophen, semaglutide, CHEMBL25"
             ):
                 input_key = f"compound:{compound_input}"
+                user_query = f"Get properties of {st.session_state.workflow_input}."
+                if st.session_state.skills_enabled:
+                    prompt = build_prompt_with_skill(user_query, 'ADME-assessment', skills_dir)
+                else:
                 # Show pills for compound properties selection
-                if compound_info := st.pills(
-                    label="What do you want to know about this compound?",
-                    options=compound_info_options,
-                    selection_mode="multi",
-                ):
-                    properties_str = ", ".join(compound_info)
-                    input_key = f"{input_key}:{properties_str}"
-                    user_query = f"Use PubChem to get {properties_str} properties of {st.session_state.workflow_input}."
-                    if st.session_state.skills_enabled:
-                        prompt = build_prompt_with_skill(user_query, 'ADME-assessment')
-                    else:
-                        prompt = user_query
+                    if compound_info := st.pills(
+                        label="What do you want to know about this compound?",
+                        options=compound_info_options,
+                        selection_mode="multi",
+                    ):
+                        properties_str = ", ".join(compound_info)
+                        input_key = f"{input_key}:{properties_str}"
+                        prompt = f"Use PubChem to {user_query} Properties include {properties_str}."
+
         with col2:
             st.button("Clear", key="clear_compound", icon=":material/clear:", on_click=clear_workflow)
 
@@ -331,11 +332,11 @@ with col_chat:
         with col1:
             if compound_input := st.text_input("Enter the compound of interest", key="workflow_input", placeholder="e.g., BRCA1, GLP-1"):
                 input_key = f"compound:{compound_input}:safety"
-                user_query = f"Use PubChem and PubMed to find safety profile of {st.session_state.workflow_input}. If citing studies, please state the strength of the evidence based on the study design."
+                user_query = f"Find safety profile of {st.session_state.workflow_input}. If citing studies, please state the strength of the evidence based on the study design."
                 if st.session_state.skills_enabled:
-                    prompt = build_prompt_with_skill(user_query, 'safety-assessment')
+                    prompt = build_prompt_with_skill(user_query, 'safety-assessment', skills_dir)
                 else:
-                    prompt = user_query
+                    prompt = f"Use PubChem and PubMed to {user_query}"
         with col2:
             st.button("Clear", key="clear_target", icon=":material/clear:", on_click=clear_workflow)
         

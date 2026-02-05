@@ -549,7 +549,7 @@ def load_skill_content(skill_name: str, skills_dir: Optional[Union[str, Path]] =
         return None
 
 
-def build_prompt_with_skill(user_query: str, skill_name: Optional[str] = None) -> str:
+def build_prompt_with_skill(user_query: str, skill_name: Optional[str] = None, skills_dir: Optional[Union[str, Path]] = None) -> str:
     """
     Build a prompt that includes skill instructions if a skill is selected.
 
@@ -563,7 +563,7 @@ def build_prompt_with_skill(user_query: str, skill_name: Optional[str] = None) -
     if not skill_name:
         return user_query
 
-    skill_data = load_skill_content(skill_name)
+    skill_data = load_skill_content(skill_name, skills_dir)
     if not skill_data:
         return user_query
 
