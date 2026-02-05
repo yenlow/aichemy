@@ -1,20 +1,7 @@
 import logging
 import streamlit as st
 from mlflow.deployments import get_deploy_client
-from utils import (
-    get_user_info, 
-    ask_agent_mlflowclient, 
-    extract_text_content, 
-    parse_tool_calls, 
-    strip_tool_call_tags, 
-    parse_genie_results,
-    discover_skills,
-    get_skill_names_for_selector,
-    get_skill_id_from_display_name,
-    load_skill_content,
-    build_prompt_with_skill,
-    extract_user_request
-)
+from utils import *
 from uuid import uuid4
 from pprint import pformat
 import time
@@ -103,20 +90,6 @@ EXAMPLE_QUESTIONS = [
     "List all the drugs in the GLP-1 agonists ATC class in DrugBank",
 ]
 
-WORKFLOWS = [
-#    "🧬 Target identification", 
-    "⌬ Hit identification", 
-    "🧪 Lead optimization", 
-    "☠️ Safety assessment"
-]
-
-workflow_captions = [
-#    "Based on a disease, get its associated targets", 
-    "Based on a target, get its associated drugs", 
-    "Based on a compound, get its properties", 
-    "Based on a compound, get its safety info"
-]
-
 compound_info_options = [
     "Structure: SMILES, InChI, MW...",
     "ADME: LogP, Druglikeness, CYP3A4...",
@@ -142,6 +115,17 @@ agents = [
 df_tools = pd.read_csv(f"{app_root}/tools.txt", sep="\t")
 TOOLS = list(df_tools.itertuples(index=False, name=None))
 
+# Load skills from skills folder
+skills_dir = get_skills_directory()
+SKILLS_METADATA = discover_skills(skills_dir)
+
+# Sort skills by order key
+sorted_skills = sorted(SKILLS_METADATA.items(), key=lambda x: x[1].get('order', 99))
+SKILLS = [name for name, _ in sorted_skills]
+SKILL_LABELS = [skill['label'] for _, skill in sorted_skills]
+SKILL_CAPTIONS = [skill['caption'] for _, skill in sorted_skills]
+
+
 # ============================================================================
 # Session State
 # ============================================================================
@@ -155,8 +139,12 @@ if "tool_calls" not in st.session_state:
     st.session_state.tool_calls = []
 if "genie" not in st.session_state:
     st.session_state.genie = []
+if "workflow_input" not in st.session_state:
+    st.session_state.workflow_input = None
 if "workflow" not in st.session_state:
     st.session_state.workflow = None
+if "skills_enabled" not in st.session_state:
+    st.session_state.skills_enabled = False
 if "is_processing" not in st.session_state:
     st.session_state.is_processing = False
 if "last_processed_input" not in st.session_state:
@@ -169,13 +157,11 @@ if "prompts_w_tools" not in st.session_state:
     st.session_state.prompts_w_tools = []
 if "prompts_w_genie" not in st.session_state:
     st.session_state.prompts_w_genie = []
-if "workflow_input" not in st.session_state:
-    st.session_state.workflow_input = None
 
 def clear_workflow():
     st.session_state.workflow = None
     st.session_state.workflow_input = None
-
+    
 
 def stop_processing():
     # Handle the case where stop was requested
@@ -185,7 +171,7 @@ def stop_processing():
             st.session_state.messages.pop()
         st.session_state.last_processed_input = None
         st.session_state.is_processing = False
-        st.session_state.workflow = None
+        clear_workflow()
         st.warning("⚠️ Query cancelled by user.")
         
 # ============================================================================
@@ -193,7 +179,7 @@ def stop_processing():
 # ============================================================================
 
 with st.sidebar:
-    st.logo(f"{app_root}/logo.svg", size="large", link=None)
+    st.image(f"{app_root}/logo.svg", width=200)
     st.markdown(
         """
     <div style="background: #e6f4ef; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;
@@ -210,15 +196,20 @@ with st.sidebar:
     st.divider()
 
     # Skills selector - dynamically loaded from skills folder
-    st.markdown("**Skills Available**")
-    skill_names, skill_captions = get_skill_names_for_selector()
-    
-    # Combine hardcoded workflows with dynamic skills for backward compatibility
-    all_skills = skill_names + WORKFLOWS
-    all_captions = skill_captions + workflow_captions
+    skill_col1, skill_col2 = st.columns([2, 2])
+    with skill_col1:
+        st.markdown("**Guided Tasks**")
+    with skill_col2:
+        st.checkbox(
+            "Skills", 
+            value=False, 
+            key="skills_enabled",
+            help="Enable Skills (SLOW!) for detailed and consistent outputs",
+            on_change=clear_workflow
+        )
     
     st.session_state.workflow = st.radio(
-        "", all_skills, index=None, captions=all_captions, label_visibility="collapsed"
+        "", SKILL_LABELS, index=None, captions=SKILL_CAPTIONS, label_visibility="collapsed"
     )
 
     st.divider()
@@ -282,6 +273,7 @@ with col_chat:
             st.session_state.tool_calls = []
             st.session_state.genie = []
             st.session_state.workflow = None
+            st.session_state.skills_enabled = False
             st.session_state.is_processing = False
             st.session_state.last_processed_input = None            
             st.session_state.stop = False
@@ -290,7 +282,7 @@ with col_chat:
             st.session_state.response_count = 0
             st.rerun()
 
-    if st.session_state.workflow == all_skills[0]:
+    if st.session_state.workflow == SKILLS_METADATA.get('target-identification').get('label'):
         # Show text input for disease of interest
         col1, col2 = st.columns([7, 1])
         with col1:
@@ -298,27 +290,31 @@ with col_chat:
                 "Enter the disease of interest", key="workflow_input", placeholder="e.g., breast cancer, Alzheimer's disease"
             ):
                 input_key = f"disease:{disease_input}"
-                user_query = f"Find targets associated with {st.session_state.workflow_input}."
-                skill_id = get_skill_id_from_display_name(st.session_state.workflow, skill_names)
-                prompt = build_prompt_with_skill(user_query, skill_id)
-
-
+                user_query = f"Use OpenTargets and optionally PubChem to find targets associated with {st.session_state.workflow_input}."
+                if st.session_state.skills_enabled:
+                    prompt = build_prompt_with_skill(user_query, 'target-identification')
+                else:
+                    prompt = user_query
         with col2:# Align with input
             st.button("Clear", key="clear_disease", icon=":material/clear:", on_click=clear_workflow)
 
 
-    elif st.session_state.workflow == all_skills[1]:
+    elif st.session_state.workflow == SKILLS_METADATA.get('hit-identification').get('label'):
         # Show text input for target of interest
         col1, col2 = st.columns([7, 1])
         with col1:
             if target_input := st.text_input("Enter the target of interest", key="workflow_input", placeholder="e.g., BRCA1, GLP-1"):
                 input_key = f"target:{target_input}"
-                prompt = f"Use OpenTargets to find drugs associated with {st.session_state.workflow_input}. Show their scores if any and rank in descending order of scores."
+                user_query = f"Use OpenTargets to find drugs associated with {st.session_state.workflow_input}. Show their scores if any and rank in descending order of scores."
+                if st.session_state.skills_enabled:
+                    prompt = build_prompt_with_skill(user_query, 'hit-identification')
+                else:
+                    prompt = user_query
         with col2:
             st.button("Clear", key="clear_target", icon=":material/clear:", on_click=clear_workflow)
 
 
-    elif st.session_state.workflow == all_skills[2]:
+    elif st.session_state.workflow == SKILLS_METADATA.get('ADME-assessment').get('label'):
         # Show text input for compound of interest
         col1, col2 = st.columns([5, 1])
         with col1:
@@ -334,17 +330,25 @@ with col_chat:
                 ):
                     properties_str = ", ".join(compound_info)
                     input_key = f"{input_key}:{properties_str}"
-                    prompt = f"Use PubChem to get {properties_str} properties of {st.session_state.workflow_input}."
+                    user_query = f"Use PubChem to get {properties_str} properties of {st.session_state.workflow_input}."
+                    if st.session_state.skills_enabled:
+                        prompt = build_prompt_with_skill(user_query, 'ADME-assessment')
+                    else:
+                        prompt = user_query
         with col2:
             st.button("Clear", key="clear_compound", icon=":material/clear:", on_click=clear_workflow)
 
-    elif st.session_state.workflow == all_skills[3]:
+    elif st.session_state.workflow == SKILLS_METADATA.get('safety-assessment').get('label'):
         # Show text input for target of interest
         col1, col2 = st.columns([7, 1])
         with col1:
             if compound_input := st.text_input("Enter the compound of interest", key="workflow_input", placeholder="e.g., BRCA1, GLP-1"):
                 input_key = f"compound:{compound_input}:safety"
-                prompt = f"Use PubChem and PubMed to find safety profile of {st.session_state.workflow_input}. If citing studies, please state the strength of the evidence based on the study design."
+                user_query = f"Use PubChem and PubMed to find safety profile of {st.session_state.workflow_input}. If citing studies, please state the strength of the evidence based on the study design."
+                if st.session_state.skills_enabled:
+                    prompt = build_prompt_with_skill(user_query, 'safety-assessment')
+                else:
+                    prompt = user_query
         with col2:
             st.button("Clear", key="clear_target", icon=":material/clear:", on_click=clear_workflow)
         
@@ -424,7 +428,7 @@ with col_chat:
                         assistant_response = "\n\n".join(cleaned_texts) if cleaned_texts else ""
                     else:
                         assistant_response = "No response. Retry or reset the chat."
-                    print(assistant_response)
+                    # print(assistant_response)
                     # Append answer to messages
                     st.session_state.messages.append(
                         {
