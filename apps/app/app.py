@@ -8,6 +8,7 @@ import time
 from io import BytesIO
 import pandas as pd
 import sys
+import os
 from pathlib import Path
 
 # Set up logging
@@ -97,26 +98,12 @@ compound_info_options = [
     "All"
 ]
 
-AGENT_PLAN = [
-    {"name": "PubChem agent", "description": "Search for compounds matching query"},
-    {"name": "OpenTargets agent", "description": "Retrieve target evidence and associations"},
-    {"name": "Hit identification agent", "description": "Rank hits by structural similarity"},
-]
-
-# TODO: mock data for agent execution. To parse from response.json()
-agents = [
-    ("Plan created", "Execution plan ready"),
-    ("PubChem agent", "2,143 candidates found"),
-    ("OpenTargets agent", "target evidence retrieved"),
-    ("VS agent", "clustered 50 diverse hits"),
-]
-
 # Load tools from tab-delimited file
 df_tools = pd.read_csv(f"{app_root}/tools.txt", sep="\t")
 TOOLS = list(df_tools.itertuples(index=False, name=None))
 
 # Load skills from skills folder
-skills_dir = get_skills_directory()
+skills_dir = os.environ.get("SKILLS_DIR") or get_skills_directory()
 SKILLS_METADATA = discover_skills(skills_dir)
 
 # Sort skills by order key
