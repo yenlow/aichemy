@@ -7,7 +7,3 @@ env:
   value: aichemy
 - name: vs_index_zinc
   value: aichemy2_catalog.aichemy.zinc_vs
-# For databricks apps deployment only
-# You can directly set env var SKILLS_DIR outside Databricks
-- name: SKILLS_DIR
-  value: /Workspace/Users/yen.low@databricks.com/aichemy_dev/skills
