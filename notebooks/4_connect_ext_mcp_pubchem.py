@@ -1,5 +1,6 @@
 # Databricks notebook source
 # MAGIC %pip install -U databricks-mcp databricks-sdk databricks-langchain mlflow
+# MAGIC %pip install langchain-mcp-adapters==0.1.14
 # MAGIC %restart_python
 
 # COMMAND ----------
@@ -12,12 +13,19 @@
 from databricks.sdk import WorkspaceClient
 import mlflow
 from mlflow.models import ModelConfig
+from src.utils import get_SP_credentials
 
 cfg = ModelConfig(development_config="config.yml")
 
 mlflow.langchain.autolog()
 
-ws_client = WorkspaceClient()
+client_id = dbutils.secrets.get(scope="aichemy", key="client_id")
+client_secret = dbutils.secrets.get(scope="aichemy", key="client_secret")
+ws_client = WorkspaceClient(
+    host=cfg.get("host"),
+    client_id=client_id,
+    client_secret=client_secret
+)
 
 # COMMAND ----------
 
@@ -112,11 +120,11 @@ os.environ["pubchem_glama_api"] = pubchem_api
 # MAGIC   conn => 'conn_aichemy_pubchem',
 # MAGIC   method => 'POST',
 # MAGIC   path => '',
-# MAGIC   json => '{"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "search_compounds", "arguments": {"query": "aspirin"}}, "id": 2}',
+# MAGIC   json => '{"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "search_compounds", "arguments": {"query": "danuglipron"}}, "id": 2}',
 # MAGIC   headers => map(
 # MAGIC     'Content-Type', 'application/json',
 # MAGIC     'Accept', 'application/json, text/event-stream',
-# MAGIC     'Mcp-Session-Id', '68c0168e-fea4-4411-b436-398e10f1ede4'
+# MAGIC     'Mcp-Session-Id', 'f6edcdb4-edd6-4f41-8d60-abfcb916f37a'
 # MAGIC   )
 # MAGIC );
 
@@ -137,7 +145,7 @@ response = ws_client.serving_endpoints.http_request(
   json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": 2},
   headers={"Content-Type": "application/json",
     "Accept": "application/json, text/event-stream",
-    "Mcp-Session-Id": "f5cd033b-6ad2-4094-a885-1d56dae107bb"}\
+    "Mcp-Session-Id": "f6edcdb4-edd6-4f41-8d60-abfcb916f37a"}\
 )
 pprint(response.__dict__)
 
@@ -162,4 +170,97 @@ mcp_client.list_tools(timeout=60, terminate_on_close=False)
 
 # COMMAND ----------
 
-mcp_client.call_tool("search_compounds", {"query": "aspirin"}, terminate_on_close=False)
+mcp_client.call_tool("search_compounds", {"query": "danuglipron"}, terminate_on_close=False)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Option 4: databricks-langchain
+
+# COMMAND ----------
+
+import asyncio
+from databricks_langchain import DatabricksMCPServer, DatabricksMultiServerMCPClient
+
+server = DatabricksMCPServer(
+    name="pubchem",
+    url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("pubchem")}',
+    workspace_client=ws_client,
+    timeout=60,
+    terminate_on_close=False
+)
+
+client = DatabricksMultiServerMCPClient([server])
+atools = await client.get_tools()
+atools
+
+# COMMAND ----------
+
+import nest_asyncio
+nest_asyncio.apply()
+
+def get_tools(mcp_client: DatabricksMultiServerMCPClient):
+    async def aget_tools():
+        await client.get_tools()
+    return asyncio.run(aget_tools())
+tools = get_tools(client)
+tools
+
+# COMMAND ----------
+
+import asyncio
+
+async def call_specific_tool():
+    # Find and call a specific tool by name
+    tool_name = "search_compounds"  # Replace with actual tool name
+    specific_tool = next((t for t in atools if t.name == tool_name), None)
+    
+    if specific_tool:
+        # Call the tool with arguments
+        result = await specific_tool.ainvoke({"query": "danuglipron"})
+        print(f"Result: {result}")
+    else:
+        print(f"Tool '{tool_name}' not found")
+
+await call_specific_tool()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #### Alternatively, wrap into an agent with `create_agent`
+
+# COMMAND ----------
+
+from databricks_langchain import ChatDatabricks
+from langchain.agents import create_agent
+
+llm = ChatDatabricks(endpoint=cfg.get("llm_endpoint"))
+async_agent = create_agent(llm, atools)
+
+# COMMAND ----------
+
+from databricks_langchain import ChatDatabricks
+from langchain.agents import create_agent
+
+llm = ChatDatabricks(endpoint=cfg.get("llm_endpoint"))
+agent = create_agent(llm, tools)
+
+# COMMAND ----------
+
+input_example = {
+    "messages": [
+        {
+            "role": "user",
+            "content": "What is the CID of danuglipron?"
+        }
+    ]
+}
+await async_agent.ainvoke(input_example)
+
+# COMMAND ----------
+
+await agent.ainvoke(input_example)
+
+# COMMAND ----------
+
+

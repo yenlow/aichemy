@@ -52,7 +52,7 @@ artifact_path = "agent"
 
 from uuid import uuid4
 
-query = "What is the mw of danuglipron?"
+query = "What is the CID of danuglipron?"
 input_message = {
     "messages": [
         {
@@ -118,57 +118,28 @@ with mlflow.start_run():
 
 # COMMAND ----------
 
-# model_uri = f"runs:/{logged_agent_info.run_id}/{artifact_path}"
-model_uri = 'runs:/b7df8facc77e4432b6028f46ca0f3fb8/agent' #v11
+model_uri = f"runs:/{logged_agent_info.run_id}/{artifact_path}"
+# model_uri = 'runs:/b7df8facc77e4432b6028f46ca0f3fb8/agent' #v11
 model_uri
 
 # COMMAND ----------
 
 loaded_model = mlflow.pyfunc.load_model(model_uri)
+
+# COMMAND ----------
+
 response = loaded_model.predict(input)
 response
 
 # COMMAND ----------
 
-thread_id = str(uuid4())
-input_message = {
-    "messages": [
-        {
-            "role": "user",
-            "content": "Show me compounds similar to vemurafenib. Display their structures"
-        }
-    ]
-}
-input = {
-    "input": input_message["messages"],
-    "custom_inputs": {"thread_id": thread_id, "recursion_limit": 50}
-}
-response = loaded_model.predict(input)
-
-# COMMAND ----------
-
-thread_id = str(uuid4())
-input_message = {
-    "messages": [
-        {
-            "role": "user",
-            "content": "Get the ECFP4 fingerprint embedding of danuglipron as a bitstring using the get_embedding(smiles) tool in the chem_utils agent"
-        }
-    ]
-}
-input = {
-    "input": input_message["messages"],
-    "custom_inputs": {"thread_id": thread_id, "recursion_limit": 50}
-}
-loaded_model.predict(input)
-
-# COMMAND ----------
+thread_id = str(uuid.uuid4())
 
 input_message = {
     "messages": [
         {
             "role": "user",
-            "content": "What molecule in ZINC is most structurally similar to danuglipron based on ECFP4?"
+            "content": "Find molecules in the ZINC vector store most similar to danuglipron based on ECFP4 fingerprint embeddings"
         }
     ]
 }
@@ -212,6 +183,24 @@ loaded_model.predict(input)
 
 # COMMAND ----------
 
+thread_id = str(uuid.uuid4())
+
+input_message = {
+    "messages": [
+        {
+            "role": "user",
+            "content": "What is the latest review on the safety of danuglipron?"
+        }
+    ]
+}
+input = {
+    "input": input_message["messages"],
+    "custom_inputs": {"thread_id": thread_id}
+}
+loaded_model.predict(input)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Deploy model
 
@@ -229,7 +218,7 @@ from databricks import agents
 # Deploy the model to the review app and a model serving endpoint
 agents.deploy(model_name=registered_name, 
               model_version=latest_version,
-              endpoint_name="aichemy",
+              endpoint_name="aichemy-dev",
               scale_to_zero=True,
               tags = {"endpointSource": "docs"},
               environment_vars={

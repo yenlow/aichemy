@@ -169,35 +169,46 @@ zinc_agent = create_agent(
 
 from databricks_langchain import DatabricksMultiServerMCPClient, DatabricksMCPServer, MCPServer
 
-mcp_client = DatabricksMultiServerMCPClient(
-    [
-        DatabricksMCPServer(
-            name="pubchem",
-            url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("pubchem")}',
-            workspace_client=ws_client,
-            timeout=60,
-            terminate_on_close=False
-        ),
-        DatabricksMCPServer(
-            name="pubmed",
-            url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("pubmed")}',
-            workspace_client=ws_client,
-            terminate_on_close=False
-        ),
-        # Using the UC connection url doesn't work
-        # DatabricksMCPServer(
-        #     name="opentargets",
-        #     url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("opentargets")}',
-        #     workspace_client=ws_client
-        # ),
-        # Using the original url works
-        MCPServer(
-            name="opentargets",
-            url="https://mcp.platform.opentargets.org/mcp",
-#            headers={"X-API-Key": "no_bearer_token"},
-        ),
-    ]
-)
+servers = [
+    DatabricksMCPServer(
+        name="pubchem",
+        url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("pubchem")}',
+        workspace_client=ws_client,
+        timeout=60*3,
+        terminate_on_close=False
+    ),
+    DatabricksMCPServer(
+        name="pubmed",
+        url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("pubmed")}',
+        workspace_client=ws_client,
+        timeout=60*3,
+        terminate_on_close=False
+    ),
+    # Using the UC connection url doesn't work
+    # DatabricksMCPServer(
+    #     name="opentargets",
+    #     url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("opentargets")}',
+    #     workspace_client=ws_client
+    # ),
+    # Using the original url works
+    MCPServer(
+        name="opentargets",
+        url="https://mcp.platform.opentargets.org/mcp",
+    #            headers={"X-API-Key": "no_bearer_token"}
+    )
+]
+servers
+
+# COMMAND ----------
+
+class McpClient(DatabricksMultiServerMCPClient):
+    def __init__(self, servers: list[MCPServer], **kwargs):
+        super().__init__(servers=servers, **kwargs)
+
+    def load_tools(self):
+        async def aload_tools():
+            return await self.get_tools()
+        return asyncio.run(aload_tools())
 
 # COMMAND ----------
 
@@ -205,11 +216,12 @@ import asyncio
 import nest_asyncio
 nest_asyncio.apply()
 
-def get_tools(mcp_client: DatabricksMultiServerMCPClient):
-    async def aget_tools():
-        await mcp_client.get_tools()
-    return asyncio.run(aget_tools())
-mcp_tools = get_tools(mcp_client)
+mcp_client = McpClient(servers)
+mcp_tools = mcp_client.load_tools()
+mcp_tools
+
+# COMMAND ----------
+
 mcp_prompt = """You are a multi-MCP server agent connected to:
 1. PubChem MCP server that provides everything about chemical compounds
 2. PubMed MCP server that searches biomedical literature and retrieves free full text if any. 
@@ -228,10 +240,9 @@ mcp_agent = create_agent(
 
 import pandas as pd
 
-# mcp_tools_list = await mcp_client.get_tools()
 names = ["PubChem"] * 29 + ["PubMed"] * 12 + ["OpenTargets"] * 5
-tools.extend([(i, j.name, j.description.split("\n")[0]) for i,j in zip(names, mcp_tools_list)])
-pd.DataFrame(tools, columns=["Agent", "Tool", "Description"]).to_csv("../apps/app/tools.txt", sep="\t", index=False)
+tools.extend([(i, j.name, j.description.split("\n")[0]) for i,j in zip(names, mcp_tools)])
+# pd.DataFrame(tools, columns=["Agent", "Tool", "Description"]).to_csv("../apps/app/tools.txt", sep="\t", index=False)
 
 # COMMAND ----------
 
@@ -240,23 +251,11 @@ pd.DataFrame(tools, columns=["Agent", "Tool", "Description"]).to_csv("../apps/ap
 #     "messages": [
 #         {
 #             "role": "user",
-#             "content": "What is the mw of danuglipron?"
+#             "content": "Find the CID of danuglipron"
 #         }
 #     ]
 # }
 # await mcp_agent.ainvoke(input_example)
-
-# COMMAND ----------
-
-# input_example = {
-#     "messages": [
-#         {
-#             "role": "user",
-#             "content": "What is the mw of danuglipron?"
-#         }
-#     ]
-# }
-# pubchem_agent.invoke(input_example)
 
 # COMMAND ----------
 
@@ -290,15 +289,15 @@ workflow = create_supervisor(
 
 # COMMAND ----------
 
-# workflow.compile().invoke({"messages": [{"role": "user", "content": "Show the aspirin molecule. First get its CID from PubChem then get the molecule_png_url then display in markdown"}]})
+# await workflow.compile().ainvoke({"messages": [{"role": "user", "content": "Show the danuglipron molecule. First get its CID from PubChem then get the molecule_png_url then display in markdown"}]})
 
 # COMMAND ----------
 
-# await workflow.compile().ainvoke({"messages": [{"role": "user", "content": "Show the aspirin molecule. First get its CID from PubChem then get the molecule_png_url then display in markdown"}]})
+# workflow.compile().invoke({"messages": [{"role": "user", "content": "Show the danuglipron molecule. First get its CID from PubChem then get the molecule_png_url then display in markdown"}]})
 
 # COMMAND ----------
 
-# async for chunk in workflow.compile().astream({"messages": [{"role": "user", "content": "Show the aspirin molecule"}]}):
+# async for chunk in workflow.compile().astream({"messages": [{"role": "user", "content": "Show the danuglipron molecule. First get its CID from PubChem then get the molecule_png_url then display in markdown"}]}):
 #     print(chunk, flush=True)
 
 # COMMAND ----------
@@ -328,24 +327,11 @@ mlflow.models.set_model(agent)
 
 # thread_id = str(uuid4())
 # inputs = {
-#     "input": [{"role": "user", "content": "What is the ENSEMBL ID of GLP-1"}], 
+#     "input": [{"role": "user", "content": "Show the danuglipron molecule. First get its CID from PubChem then get the molecule_png_url then display in markdown"}], 
 #     "custom_inputs": {"thread_id": thread_id}
 # }
 # response1 = agent.predict(inputs)
 # response1
-
-# COMMAND ----------
-
-# from uuid import uuid4
-# import nest_asyncio
-# nest_asyncio.apply()
-#
-# thread_id = str(uuid4())
-# inputs = {
-#     "input": [{"role": "user", "content": "What is the CID of danuglipron?"}], 
-#     "custom_inputs": {"thread_id": thread_id}
-# }
-# response1 = agent.predict(inputs)
 
 # COMMAND ----------
 
