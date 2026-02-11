@@ -5,7 +5,8 @@ import ChatPanel from './components/ChatPanel'
 import AgentPanel from './components/AgentPanel'
 import {
   askAgentStream,
-  getUserInfo,
+  fetchUserInfo,
+  fetchDbStatus,
   listProjects,
   createProject,
   loadProject,
@@ -63,8 +64,13 @@ export default function App() {
   const [selectedWorkflow, setSelectedWorkflow] = useState(null)
   const [skillsEnabled, setSkillsEnabled] = useState(false)
 
+  // User identity (fetched from backend on mount)
+  const [userInfo, setUserInfo] = useState({ user_id: null, user_name: '', user_email: '' })
+
+  // DB backend status
+  const [dbStatus, setDbStatus] = useState(null)
+
   const chatHistoryRef = useRef(null)
-  const userInfo = getUserInfo()
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -80,7 +86,10 @@ export default function App() {
   useEffect(() => {
     async function init() {
       try {
-        const list = await listProjects(userInfo.user_id)
+        const [user, status] = await Promise.all([fetchUserInfo(), fetchDbStatus()])
+        setUserInfo(user)
+        setDbStatus(status)
+        const list = await listProjects(user.user_id)
         setProjects(list)
         if (list.length > 0) {
           await switchToProject(list[0].id)
@@ -307,6 +316,7 @@ export default function App() {
         onSelectWorkflow={setSelectedWorkflow}
         skillsEnabled={skillsEnabled}
         onToggleSkills={setSkillsEnabled}
+        dbStatus={dbStatus}
       />
       <main className="main-content">
         <ChatPanel

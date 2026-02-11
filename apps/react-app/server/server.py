@@ -13,7 +13,7 @@ from uuid import uuid4
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -21,31 +21,172 @@ from typing import List, Optional, Union
 from databricks.sdk import WorkspaceClient
 
 # ---------------------------------------------------------------------------
-# Database layer – SQLite for local dev, Postgres for production
-#
-# Set DATABASE_URL to use Postgres (works with any Postgres, including Lakebase):
-#   DATABASE_URL=postgresql://user:pass@host:5432/dbname
-#
-# If DATABASE_URL is not set, falls back to a local SQLite file.
+# Database layer – auto-connects to Lakebase if Databricks auth is available,
+# otherwise falls back to local SQLite. No manual config needed.
 # ---------------------------------------------------------------------------
 
 class ProjectDB:
-    """Thin abstraction over SQLite or Postgres for project storage."""
+    """Project storage with automatic Lakebase Autoscaling connection.
 
-    def __init__(self, database_url: Optional[str] = None, sqlite_path: str = "projects.db"):
-        self._database_url = database_url
+    On startup, tries to connect to Lakebase Autoscaling using Databricks SDK auth.
+    If that fails for any reason, silently falls back to local SQLite.
+
+    Lakebase Autoscaling uses the w.postgres API with hierarchical resource names:
+      projects/{project_id}/branches/{branch_id}/endpoints/{endpoint_id}
+    """
+
+    def __init__(self, sqlite_path: str = "projects.db"):
         self._sqlite_path = sqlite_path
-        self._use_pg = database_url is not None
-        self._pg_pool = None
-        self._init_db()
+        self._use_pg = False
+        self._lakebase_project_id: Optional[str] = None
+        self._lakebase_branch_id: Optional[str] = None
+        self._lakebase_endpoint_id: Optional[str] = None
+        self._lakebase_endpoint_name: Optional[str] = None  # full resource path
+        self._lakebase_database: Optional[str] = None
+        self._lakebase_host: Optional[str] = None
+        self._lakebase_token: Optional[str] = None
+        self._lakebase_user: Optional[str] = None
+        self._sp_client: Optional[WorkspaceClient] = None
+
+    def init(self):
+        """Initialize DB — call after WorkspaceClient is available."""
+        if self._try_lakebase():
+            print("[ProjectDB] Using Lakebase Autoscaling Postgres")
+        else:
+            print("[ProjectDB] Using local SQLite")
+            self._init_sqlite()
+
+    # -- Lakebase Autoscaling auto-detection --------------------------------
+
+    def _try_lakebase(self) -> bool:
+        """Try to auto-connect to Lakebase Autoscaling using service principal credentials.
+
+        Flow:
+          1. Read config.yml for lakebase project_id / branch_id / endpoint_id / database
+          2. Use user's CLI auth to fetch SP credentials from Databricks secrets
+          3. Create an SP-authenticated WorkspaceClient
+          4. Resolve endpoint host via w.postgres.get_endpoint()
+          5. Generate an ephemeral OAuth token via w.postgres.generate_database_credential()
+          6. Test the connection (with retry for scale-to-zero wake-up)
+
+        Falls back to SQLite if any step fails.
+        """
+        try:
+            from base64 import b64decode
+
+            # 1. Read config.yml
+            cfg_path = Path(__file__).resolve().parent.parent.parent.parent / "notebooks" / "config.yml"
+            if not cfg_path.exists():
+                print("[ProjectDB] config.yml not found, skipping Lakebase")
+                return False
+
+            with open(cfg_path) as f:
+                cfg = yaml.safe_load(f)
+
+            lakebase_cfg = cfg.get("lakebase")
+            if not lakebase_cfg or not lakebase_cfg.get("project_id"):
+                return False
+
+            self._lakebase_project_id = lakebase_cfg["project_id"]
+            self._lakebase_branch_id = lakebase_cfg.get("branch_id", "main")
+            self._lakebase_endpoint_id = lakebase_cfg.get("endpoint_id", "primary")
+            self._lakebase_database = lakebase_cfg.get("database", "databricks_postgres")
+            self._lakebase_endpoint_name = (
+                f"projects/{self._lakebase_project_id}"
+                f"/branches/{self._lakebase_branch_id}"
+                f"/endpoints/{self._lakebase_endpoint_id}"
+            )
+            host = cfg.get("host")
+
+            # 2. Fetch SP credentials from Databricks secrets
+            w = _get_workspace_client()
+            sp_id_b64 = w.secrets.get_secret("aichemy", "client_id").value
+            sp_secret_b64 = w.secrets.get_secret("aichemy", "client_secret").value
+            sp_client_id = b64decode(sp_id_b64).decode("utf-8")
+            sp_client_secret = b64decode(sp_secret_b64).decode("utf-8")
+            print(f"[ProjectDB] SP credentials retrieved (client_id={sp_client_id[:8]}...)")
+
+            # 3. Create SP-authenticated client
+            sp_client = WorkspaceClient(
+                host=host,
+                client_id=sp_client_id,
+                client_secret=sp_client_secret,
+            )
+
+            # 4. Resolve endpoint host via Lakebase Autoscaling API
+            endpoint = sp_client.postgres.get_endpoint(name=self._lakebase_endpoint_name)
+            self._lakebase_host = endpoint.status.hosts.host
+            self._lakebase_user = sp_client_id  # SP client_id IS the Postgres role
+
+            # 5. Generate ephemeral OAuth token (1h expiry)
+            cred = sp_client.postgres.generate_database_credential(
+                endpoint=self._lakebase_endpoint_name,
+            )
+            self._lakebase_token = cred.token
+
+            # Cache the SP client for token refresh
+            self._sp_client = sp_client
+
+            # 6. Test the connection (retry for scale-to-zero wake-up)
+            import psycopg
+            conninfo = self._build_conninfo()
+            self._connect_with_retry(conninfo)
+
+            print(f"[ProjectDB] Lakebase Autoscaling connected: {self._lakebase_host} / {self._lakebase_database}")
+            self._use_pg = True
+            self._create_pg_tables()
+            return True
+
+        except Exception as e:
+            print(f"[ProjectDB] Lakebase auto-connect failed ({e}), falling back to SQLite")
+            self._use_pg = False
+            return False
+
+    def _connect_with_retry(self, conninfo: str, max_retries: int = 5, base_delay: float = 1.0):
+        """Connect with retry logic for Lakebase Autoscaling scale-to-zero wake-up.
+
+        When compute is scaled to zero, the first connection attempt may fail while
+        the compute wakes up (typically a few hundred milliseconds). We retry with
+        exponential backoff to handle this gracefully.
+        """
+        import psycopg
+        import time
+
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                with psycopg.connect(conninfo, connect_timeout=10) as conn:
+                    conn.execute("SELECT 1")
+                return  # success
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)  # 1s, 2s, 4s, 8s, 16s
+                    print(f"[ProjectDB] Connection attempt {attempt + 1} failed, retrying in {delay}s... ({e})")
+                    time.sleep(delay)
+        raise last_error
+
+    def _build_conninfo(self) -> str:
+        return (
+            f"dbname={self._lakebase_database} "
+            f"user={self._lakebase_user} "
+            f"password={self._lakebase_token} "
+            f"host={self._lakebase_host} "
+            f"sslmode=require"
+        )
+
+    def _refresh_token(self):
+        """Refresh the Lakebase OAuth token using the cached SP client."""
+        try:
+            cred = self._sp_client.postgres.generate_database_credential(
+                endpoint=self._lakebase_endpoint_name,
+            )
+            self._lakebase_token = cred.token
+            print("[ProjectDB] Token refreshed successfully")
+        except Exception as e:
+            print(f"[ProjectDB] Token refresh failed: {e}")
 
     # -- Initialization -----------------------------------------------------
-
-    def _init_db(self):
-        if self._use_pg:
-            self._init_pg()
-        else:
-            self._init_sqlite()
 
     def _init_sqlite(self):
         with self._conn() as conn:
@@ -64,16 +205,8 @@ class ProjectDB:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id)")
             conn.commit()
 
-    def _init_pg(self):
-        import psycopg
-        from psycopg_pool import ConnectionPool
-        self._pg_pool = ConnectionPool(
-            conninfo=self._database_url,
-            kwargs={"autocommit": False},
-            min_size=1,
-            max_size=10,
-            open=True,
-        )
+    def _create_pg_tables(self):
+        """Create the projects table in Lakebase if it doesn't exist."""
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute("""
@@ -97,8 +230,21 @@ class ProjectDB:
     @contextmanager
     def _conn(self):
         if self._use_pg:
-            with self._pg_pool.connection() as conn:
-                yield conn
+            import psycopg
+            try:
+                with psycopg.connect(self._build_conninfo(), connect_timeout=10) as conn:
+                    yield conn
+            except Exception as e:
+                # Token may have expired or compute may have scaled to zero
+                print(f"[ProjectDB] Connection failed ({e}), refreshing token and retrying...")
+                self._refresh_token()
+                try:
+                    self._connect_with_retry(self._build_conninfo(), max_retries=3, base_delay=0.5)
+                    with psycopg.connect(self._build_conninfo(), connect_timeout=10) as conn:
+                        yield conn
+                except Exception as retry_err:
+                    print(f"[ProjectDB] Retry also failed: {retry_err}")
+                    raise
         else:
             conn = sqlite3.connect(self._sqlite_path)
             conn.row_factory = sqlite3.Row
@@ -222,15 +368,69 @@ def _get_workspace_client() -> WorkspaceClient:
         _workspace_client = WorkspaceClient(host=DATABRICKS_HOST)
     return _workspace_client
 
-# Initialize project database
-# Set DATABASE_URL for Postgres (e.g. Lakebase): postgresql://user:pass@host:5432/dbname
-db = ProjectDB(
-    database_url=os.getenv("DATABASE_URL"),
-    sqlite_path=os.getenv("PROJECTS_DB_PATH", "projects.db"),
-)
+# Initialize project database (lazy — Lakebase auto-detection happens on startup event)
+db = ProjectDB(sqlite_path=os.getenv("PROJECTS_DB_PATH", "projects.db"))
 
-# Default user for local development (in production, read from auth headers)
-DEFAULT_USER_ID = "demo-user"
+
+@app.on_event("startup")
+async def _startup_init_db():
+    """Auto-detect and connect to Lakebase on startup, fallback to SQLite."""
+    db.init()
+
+# ---------------------------------------------------------------------------
+# User identity — cached after first resolution
+# Priority: Databricks forwarded headers > Databricks CLI auth > env vars > defaults
+# ---------------------------------------------------------------------------
+
+_cached_user_info: Optional[dict] = None
+
+
+def _resolve_local_user() -> dict:
+    """Try to get the current user from Databricks CLI auth, with fallbacks."""
+    global _cached_user_info
+    if _cached_user_info is not None:
+        return _cached_user_info
+
+    # Try Databricks SDK (uses CLI auth / env config)
+    try:
+        w = _get_workspace_client()
+        me = w.current_user.me()
+        _cached_user_info = {
+            "user_name": me.display_name or me.user_name or "Unknown",
+            "user_email": me.user_name or "",  # user_name is typically the email
+            "user_id": me.user_name or str(me.id),
+        }
+        return _cached_user_info
+    except Exception:
+        pass
+
+    # Fall back to env vars (no built-in defaults — requires Databricks auth)
+    _cached_user_info = {
+        "user_name": os.getenv("DEFAULT_USER_NAME"),
+        "user_email": os.getenv("DEFAULT_USER_EMAIL"),
+        "user_id": os.getenv("DEFAULT_USER_ID"),
+    }
+    return _cached_user_info
+
+
+@app.get("/api/user")
+async def get_user(request: Request):
+    """Return the current user identity.
+
+    In Databricks Apps, the platform injects X-Forwarded-* headers.
+    Locally, resolves from Databricks CLI auth (cached after first call).
+    """
+    # Production: Databricks Apps forwards headers
+    forwarded_user = request.headers.get("X-Forwarded-User")
+    if forwarded_user:
+        return {
+            "user_name": request.headers.get("X-Forwarded-Preferred-Username") or forwarded_user,
+            "user_email": request.headers.get("X-Forwarded-Email") or forwarded_user,
+            "user_id": forwarded_user,
+        }
+
+    # Local dev: resolve from Databricks CLI auth
+    return _resolve_local_user()
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -255,7 +455,7 @@ class CreateProjectRequest(BaseModel):
 class UpdateProjectRequest(BaseModel):
     name: Optional[str] = None
     messages: Optional[list] = None
-    agent_steps: Optional[list] = None
+    agent_steps: Union[list, dict, None] = None  # frontend sends {toolCallGroups, genieGroups}
 
 # ---------------------------------------------------------------------------
 # Agent proxy endpoint
@@ -450,13 +650,13 @@ async def call_agent_stream(request: AgentRequest):
 @app.get("/api/projects")
 async def list_projects(user_id: str = Query(default=None)):
     """List all projects for a user, ordered by most recently updated."""
-    uid = user_id or DEFAULT_USER_ID
+    uid = user_id or _resolve_local_user()["user_id"]
     return db.list_projects(uid)
 
 @app.post("/api/projects")
 async def create_project(req: CreateProjectRequest):
     """Create a new project. Returns the full project object."""
-    uid = req.user_id or DEFAULT_USER_ID
+    uid = req.user_id or _resolve_local_user()["user_id"]
     return db.create_project(uid, req.name)
 
 @app.get("/api/projects/{project_id}")
@@ -732,8 +932,19 @@ async def get_skills():
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "host": DATABRICKS_HOST}
+    """Health check endpoint — also reports which DB backend is active."""
+    if db._use_pg:
+        db_backend = "lakebase-autoscaling"
+        db_detail = f"{db._lakebase_endpoint_name} / {db._lakebase_database}"
+    else:
+        db_backend = "sqlite"
+        db_detail = db._sqlite_path
+    return {
+        "status": "healthy",
+        "host": DATABRICKS_HOST,
+        "db_backend": db_backend,
+        "db_detail": db_detail,
+    }
 
 if __name__ == "__main__":
     import uvicorn

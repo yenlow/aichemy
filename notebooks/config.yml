@@ -18,7 +18,10 @@ retriever:
   vs_index: aichemy2_catalog.aichemy.zinc_vs
   vs_source: aichemy2_catalog.aichemy.zinc15_250k_full
   k: 5
-# for agentic memory
+# Lakebase Autoscaling — project state persistence
+# Resource hierarchy: projects/{project_id}/branches/{branch_id}/endpoints/{endpoint_id}
 lakebase:
-  instance_name: aichemy
-  database: aichemy
+  project_id: 4ace19ac-439a-4edd-9eb4-e053d3990938    # display_name: aichemy
+  branch_id: br-patient-hat-d1i3ijt8
+  endpoint_id: ep-snowy-frost-d1ws26jv
+  database: databricks_postgres

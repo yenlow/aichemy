@@ -273,6 +273,30 @@ body {
 .tool-group-items { padding: 4px 0 4px 16px; }
 .tool-item { font-size: 12px; color: var(--text-secondary); padding: 2px 0; }
 
+/* DB status indicator */
+.sidebar-spacer { flex: 1; }
+.db-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px 0;
+  border-top: 1px solid var(--border-color);
+  margin-top: 12px;
+  cursor: default;
+}
+.db-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.db-dot.connected { background-color: #22c55e; }
+.db-dot.local { background-color: #f59e0b; }
+.db-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* ========================================================================= */
 /* Chat Column                                                               */
 /* ========================================================================= */

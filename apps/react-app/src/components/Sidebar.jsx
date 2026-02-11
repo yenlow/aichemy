@@ -24,6 +24,7 @@ export default function Sidebar({
   onSelectWorkflow,
   skillsEnabled,
   onToggleSkills,
+  dbStatus,
 }) {
   const [renamingId, setRenamingId] = useState(null)
   const [renameValue, setRenameValue] = useState('')
@@ -160,16 +161,29 @@ export default function Sidebar({
               <span>{label}</span>
               <span className="chevron">{expandedGroup === key ? '▾' : '▸'}</span>
             </button>
-            {caption && <div className="tool-group-caption">{caption}</div>}
-            {expandedGroup === key && tools[key] && (
-              <div className="tool-group-items">
-                {tools[key].map((t) => (
-                  <div key={t.name} className="tool-item">{t.name}</div>
-                ))}
-              </div>
+            {expandedGroup === key && (
+              <>
+                {caption && <div className="tool-group-caption">{caption}</div>}
+                {tools[key] && (
+                  <div className="tool-group-items">
+                    {tools[key].map((t) => (
+                      <div key={t.name} className="tool-item">{t.name}</div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         ))}
+      </div>
+
+      {/* DB status indicator */}
+      <div className="sidebar-spacer" />
+      <div className="db-status-badge" title={dbStatus?.db_detail || ''}>
+        <span className={`db-dot ${dbStatus?.db_backend === 'lakebase' ? 'connected' : 'local'}`} />
+        <span className="db-label">
+          {dbStatus?.db_backend === 'lakebase' ? 'Lakebase' : dbStatus?.db_backend === 'sqlite' ? 'SQLite (local)' : '…'}
+        </span>
       </div>
     </aside>
   )
