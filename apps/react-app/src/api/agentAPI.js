@@ -150,16 +150,36 @@ export async function fetchSkills() {
 }
 
 /**
- * Get user info (for authenticated contexts)
- * In Databricks Apps, this would come from headers
- * @returns {Object} User info object
+ * Fetch user info from the backend.
+ * In Databricks Apps, the backend reads X-Forwarded-* headers.
+ * Locally, falls back to defaults (configurable via env vars).
+ * @returns {Promise<{user_name: string, user_email: string, user_id: string}>}
  */
-export function getUserInfo() {
-  return {
-    user_name: 'Demo User',
-    user_email: 'demo@example.com',
-    user_id: 'demo-user',
+export async function fetchUserInfo() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user`)
+    if (response.ok) return response.json()
+  } catch {
+    // fall through to defaults
   }
+  return { user_name: null, user_email: null, user_id: null }
+}
+
+/**
+ * Fetch DB backend status from the health endpoint.
+ * @returns {Promise<{db_backend: string, db_detail: string}>}
+ */
+export async function fetchDbStatus() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/health`)
+    if (response.ok) {
+      const data = await response.json()
+      return { db_backend: data.db_backend, db_detail: data.db_detail }
+    }
+  } catch {
+    // ignore
+  }
+  return { db_backend: 'unknown', db_detail: '' }
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +188,7 @@ export function getUserInfo() {
 
 /**
  * List all projects for a user, ordered by most recently updated.
- * @param {string} [userId] - User ID (defaults to demo-user on backend)
+ * @param {string} [userId] - User ID (resolved from Databricks auth on backend)
  * @returns {Promise<Array<{id: string, name: string, created_at: string, updated_at: string}>>}
  */
 export async function listProjects(userId) {
