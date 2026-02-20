@@ -24,7 +24,7 @@ project_root = Path(__file__).resolve().parent.parent.parent
 app_root = Path(__file__).resolve().parent
 sys.path.insert(0, str(app_root))
 sys.path.insert(0, str(project_root))
-print(f"sys.path: {sys.path}")
+#print(f"sys.path: {sys.path}")
 
 # ============================================================================
 # Page Config
@@ -85,11 +85,14 @@ st.markdown(
 # Data
 # ============================================================================
 EXAMPLE_QUESTIONS = [
-    "Get the latest review study on the GI toxicity of danuglipron",
-    "What diseases are associated with EGFR",
-    "Show me compounds similar to vemurafenib. Display their structures",
+    "What is the CID of danuglipron?",
+    "What are the therapuetic targets associated with NSCLC",
     "List all the drugs in the GLP-1 agonists ATC class in DrugBank",
+    "Show me 3 compounds similar to vemurafenib. Display their structures",
+    "Get the latest review study on the GI toxicity of danuglipron"
 ]
+
+THREAD_IDS = [f"example_thread_{i+1:03d}" for i in range(len(EXAMPLE_QUESTIONS))]
 
 compound_info_options = [
     "Structure: SMILES, InChI, MW...",
@@ -120,6 +123,8 @@ if "user_id" not in st.session_state:
     st.session_state.user_id = user_info.get("user_id")
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid4())
+if "selected_question" not in st.session_state:
+    st.session_state.selected_question = None
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "tool_calls" not in st.session_state:
@@ -256,6 +261,7 @@ with col_chat:
     with reset_col:
         if st.button("Reset", key="reset", icon=":material/replay:"):
             st.session_state.thread_id = str(uuid4())
+            st.session_state.selected_question = None
             st.session_state.messages = []
             st.session_state.tool_calls = []
             st.session_state.genie = []
@@ -344,13 +350,13 @@ with col_chat:
         # Example questions - show only when chat is empty
         if len(st.session_state.messages) == 0:
             st.caption("**Try these example questions:**")
-            selected_question = st.pills(
-                "example_pills", EXAMPLE_QUESTIONS, selection_mode="single", label_visibility="collapsed", default=None
+            st.pills(
+                "example_pills", EXAMPLE_QUESTIONS, key="selected_question", selection_mode="single", label_visibility="collapsed", default=None
             )
 
-            if selected_question:
-                input_key = f"example:{selected_question}"
-                prompt = selected_question
+            if st.session_state.selected_question:
+                prompt = st.session_state.selected_question
+                input_key = f"example:{prompt}"
 
     # Only process if we have a new input (not already processed) and not stopped
     if prompt and input_key != st.session_state.last_processed_input and not st.session_state.stop:
@@ -364,6 +370,10 @@ with col_chat:
             "custom_inputs": {"thread_id": st.session_state.thread_id},
             "databricks_options": {"return_trace": True}
         }
+        if st.session_state.selected_question:
+            index = EXAMPLE_QUESTIONS.index(st.session_state.selected_question)
+            input_dict_w_skill["custom_inputs"]["thread_id"] = THREAD_IDS[index] #cache it to a specific thread id
+
         input_dict = input_dict_w_skill.copy()
         input_dict["input"] = [{"role": "user", "content": extract_user_request(prompt)}]
 
@@ -378,34 +388,30 @@ with col_chat:
                 st.session_state.is_processing = True
                 # Add stop button inside the status widget
                 st.button("Stop", type="primary", key="stop", icon=":material/stop_circle:", on_click=stop_processing)
-                
+
                 if st.session_state.is_processing and not st.session_state.stop:
                     # Query the agent endpoint
                     response_json = ask_agent_mlflowclient(
                         input_dict_w_skill, client=client
                     )  # returns response.json()
+                    # with open("response.txt", "w") as f:
+                    #     f.write(str(response_json))
                     # Write response to file
-                    with open("response_json.txt", "w") as f:
-                        f.write(pformat(response_json, width=120))
+                    # with open("response.json", "w") as f:
+                    #     f.write(pformat(response_json))
+                    
                     text_contents = extract_text_content(response_json)
                     genie_results = parse_genie_results(response_json)
-                    
+                    all_tool_calls = parse_tools(response_json)
+                    print(f"Tool calls: {all_tool_calls}")
+
                     # Only process new responses (skip previously seen ones)
                     prev_count = st.session_state.response_count
                     new_contents = text_contents[prev_count:]
                     st.session_state.response_count = len(text_contents)
+                    # print(f"New contents: {new_contents}")
                     
                     if len(new_contents) > 0:
-                        # Parse tool calls from the text content
-                        all_tool_calls = []
-                        cleaned_texts = []
-                        for text_content in new_contents:
-                            tool_calls = parse_tool_calls(text_content)
-                            all_tool_calls.extend(tool_calls)
-                            # Strip tool call tags from the text
-                            cleaned_text = strip_tool_call_tags(text_content)
-                            if cleaned_text:  # Only add non-empty cleaned text
-                                cleaned_texts.append(cleaned_text)
                         if len(all_tool_calls) > 0:
                             st.session_state.tool_calls.append(all_tool_calls)
                             st.session_state.prompts_w_tools.append(extract_user_request(prompt))
@@ -413,7 +419,7 @@ with col_chat:
                             st.session_state.genie.append(genie_results)
                             st.session_state.prompts_w_genie.append(extract_user_request(prompt))
                         # Join cleaned text contents
-                        assistant_response = "\n\n".join(cleaned_texts) if cleaned_texts else ""
+                        assistant_response = "\n\n".join(new_contents)
                     else:
                         assistant_response = "No response. Retry or reset the chat."
                     # print(assistant_response)
@@ -429,9 +435,9 @@ with col_chat:
                     
                     status.update(label="✅ Complete!", state="complete", expanded=False)
 
-            st.session_state.is_processing = False
-            st.session_state.workflow = None
-            st.rerun()
+                    st.session_state.is_processing = False
+                    st.session_state.workflow = None
+                    st.rerun()
 
 # ============================================================================
 # Agent Activity Column
@@ -448,15 +454,18 @@ with col_agents:
             st.markdown(f"**Tools calls:** _{reversed_prompts[j][:80]}..._")
             for idx, tool_call in enumerate(tool_group):
                 # Create badge for function name
-                with st.expander(rf":green[{idx+1}. 🔧{tool_call['function_name']}]", expanded=False):
+                with st.expander(rf":green[{idx+1}. 🔧{tool_call['tool_name']}]", expanded=False):
                     # Display parameters as captions
-                    if tool_call["parameters"]:
-                        for param_name, param_value in tool_call["parameters"].items():
+                    if tool_call.get("args"):
+                        for param_name, param_value in tool_call["args"].items():
                             st.caption(f"**{param_name}:** {param_value}")
 
                     # Display thinking
-                    if tool_call["thinking"]:
-                        st.info(tool_call["thinking"])
+                    if tool_call.get("answer"):
+                        try:
+                            st.json(tool_call["answer"])
+                        except:
+                            st.info(tool_call["answer"])
             st.divider()
 
     if st.session_state.genie:

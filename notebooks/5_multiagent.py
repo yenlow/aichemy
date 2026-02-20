@@ -170,12 +170,14 @@ zinc_agent = create_agent(
 from databricks_langchain import DatabricksMultiServerMCPClient, DatabricksMCPServer, MCPServer
 
 servers = [
-    DatabricksMCPServer(
+    MCPServer(
         name="pubchem",
-        url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("pubchem")}',
-        workspace_client=ws_client,
-        timeout=60*3,
-        terminate_on_close=False
+        url="https://glama.ai/endpoints/xb306rnopq/mcp",
+        headers={"Authorization": "Bearer ***REMOVED***"},
+        # url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("pubchem")}',
+        # workspace_client=ws_client,
+        # timeout=60*3,
+        # terminate_on_close=False
     ),
     DatabricksMCPServer(
         name="pubmed",

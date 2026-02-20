@@ -118,8 +118,9 @@ with mlflow.start_run():
 
 # COMMAND ----------
 
-model_uri = f"runs:/{logged_agent_info.run_id}/{artifact_path}"
+#model_uri = f"runs:/{logged_agent_info.run_id}/{artifact_path}"
 # model_uri = 'runs:/b7df8facc77e4432b6028f46ca0f3fb8/agent' #v11
+model_uri = 'runs:/5d9b131b024947d48c7d801c1b8ac651/agent' #v12
 model_uri
 
 # COMMAND ----------
