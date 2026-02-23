@@ -172,12 +172,10 @@ from databricks_langchain import DatabricksMultiServerMCPClient, DatabricksMCPSe
 servers = [
     MCPServer(
         name="pubchem",
-        url="https://glama.ai/endpoints/xb306rnopq/mcp",
-        headers={"Authorization": "Bearer ***REMOVED***"},
-        # url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("pubchem")}',
-        # workspace_client=ws_client,
-        # timeout=60*3,
-        # terminate_on_close=False
+        url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("pubchem")}',
+        workspace_client=ws_client,
+        timeout=60*3,
+        terminate_on_close=False
     ),
     DatabricksMCPServer(
         name="pubmed",
@@ -186,18 +184,11 @@ servers = [
         timeout=60*3,
         terminate_on_close=False
     ),
-    # Using the UC connection url doesn't work
-    # DatabricksMCPServer(
-    #     name="opentargets",
-    #     url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("opentargets")}',
-    #     workspace_client=ws_client
-    # ),
-    # Using the original url works
-    MCPServer(
+    DatabricksMCPServer(
         name="opentargets",
-        url="https://mcp.platform.opentargets.org/mcp",
-    #            headers={"X-API-Key": "no_bearer_token"}
-    )
+        url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("opentargets")}',
+        workspace_client=ws_client
+    ),
 ]
 servers
 
