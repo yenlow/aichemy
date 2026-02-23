@@ -116,6 +116,7 @@ class LakebaseConnect:
 
         self.connection_pool = ConnectionPool(
             conninfo=self.conninfo,
+            #TODO
 #            connection_class=AutoRefreshConnection,
             kwargs={"autocommit": True},
             min_size=1,
