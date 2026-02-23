@@ -44,20 +44,19 @@ from src.utils import get_SP_credentials
 
 # Enter client_id, client_secret of SP if any or get from WorkspaceClient.secrets
 # Do not use dbutils.secrets.get(scope="yen", key="client_secret") which is unsupported in mlflow logging in Driver
-# client_id, client_secret = get_SP_credentials(
-#     scope='aichemy',
-#     client_id_key='client_id', #if retrieving secrets (but doesn't work with mlflow logging)
-#     client_secret_key='client_secret', #if retrieving secrets (but doesn't work with mlflow logging)
-#     # must provide hardcoded values as mlflow log_model cannot retrieve secrets
-#     client_id_value = "client_id", # Hardcode client_id if any
-#     client_secret_value = "client_secret" # Hardcode client_secret if any
-# )
-# ws_client = WorkspaceClient(
-#     host=cfg.get("host"),
-#     client_id=client_id,
-#     client_secret=client_secret
-# )
-ws_client = WorkspaceClient()
+client_id, client_secret = get_SP_credentials(
+    scope='aichemy',
+    client_id_key='client_id', #if retrieving secrets (but doesn't work with mlflow logging)
+    client_secret_key='client_secret', #if retrieving secrets (but doesn't work with mlflow logging)
+    # must provide hardcoded values as mlflow log_model cannot retrieve secrets
+    client_id_value = "client_id", # Hardcode client_id if any
+    client_secret_value = "client_secret" # Hardcode client_secret if any
+)
+ws_client = WorkspaceClient(
+    host=cfg.get("host"),
+    client_id="9cf20a1a-9248-45b9-a9fc-59022d726217",
+    client_secret="dosee2ed2047ce2c43af8d1e5c6b107988d1"
+)
 
 # COMMAND ----------
 
