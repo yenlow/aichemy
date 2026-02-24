@@ -560,24 +560,18 @@ async def call_agent(request: AgentRequest):
 
         raw = response.json()
 
-        # Parse the response to extract tool calls, genie results, and clean text
+        # Tool calls come from ALL messages; display text is the last (supervisor) only
+        all_tool_calls = extract_all_tool_calls(raw)
         text_contents = extract_text_content(raw)
-        all_tool_calls = []
-        cleaned_texts = []
+        cleaned_text = ""
         if text_contents:
-            for tc_text in text_contents:
-                all_tool_calls.extend(parse_tool_calls(tc_text))
-                cleaned = strip_tool_call_tags(tc_text)
-                if cleaned:
-                    cleaned_texts.append(cleaned)
+            cleaned_text = strip_tool_call_tags(text_contents[0])
         genie_results = parse_genie_results(raw)
 
         return {
             **raw,
             "parsed": {
-                "text": "\n\n".join(cleaned_texts) if cleaned_texts else (
-                    "No response. Retry or reset the chat."
-                ),
+                "text": cleaned_text or "No response. Retry or reset the chat.",
                 "tool_calls": all_tool_calls,
                 "genie": genie_results,
             },
@@ -652,17 +646,11 @@ async def call_agent_stream(request: AgentRequest):
             yield _sse({"type": "status", "content": "Streaming response..."})
 
             raw = resp.json()
+            all_tool_calls = extract_all_tool_calls(raw)
             text_contents = extract_text_content(raw)
-            all_tool_calls = []
             cleaned_text = ""
             if text_contents:
-                cleaned_parts = []
-                for tc_text in text_contents:
-                    all_tool_calls.extend(parse_tool_calls(tc_text))
-                    cleaned = strip_tool_call_tags(tc_text)
-                    if cleaned:
-                        cleaned_parts.append(cleaned)
-                cleaned_text = "\n\n".join(cleaned_parts)
+                cleaned_text = strip_tool_call_tags(text_contents[0])
 
             # Stream the text word-by-word for typewriter effect
             if cleaned_text:
@@ -759,9 +747,10 @@ def parse_tool_calls(text_content: str) -> list[dict]:
 
 def strip_tool_call_tags(text_content: str) -> str:
     """Strip <function_calls>, <thinking>, and <results> tags from text."""
-    text_content = re.sub(r'<function_calls>\s*.*?\s*</function_calls>', '', text_content, flags=re.DOTALL)
-    text_content = re.sub(r'<thinking>\s*.*?\s*</thinking>', '', text_content, flags=re.DOTALL)
-    text_content = re.sub(r'<results>\s*.*?\s*</results>', '', text_content, flags=re.DOTALL)
+    text_content = re.sub(r'<function_calls>.*?</function_calls>', '', text_content, flags=re.DOTALL)
+    text_content = re.sub(r'<thinking>.*?</thinking>', '', text_content, flags=re.DOTALL)
+    text_content = re.sub(r'<results>.*?</results>', '', text_content, flags=re.DOTALL)
+    text_content = re.sub(r'<results>.*', '', text_content, flags=re.DOTALL)
     text_content = re.sub(r'\n\s*\n\s*\n+', '\n\n', text_content)
     return text_content.strip()
 
@@ -789,14 +778,30 @@ def parse_genie_results(response_json: dict) -> list[dict]:
 
 
 def extract_text_content(response_json: dict) -> list[str]:
-    """Extract text content from agent response."""
-    text_contents = []
+    """Extract the final (supervisor) text from the agent response.
+
+    In a multi-agent workflow the last message output is the supervisor's
+    consolidated summary.  Earlier messages are intermediate sub-agent
+    outputs and should not be shown to the user.
+    """
+    last_text = None
     for item in response_json.get("output", []):
         if item.get("type") == "message":
-            new_text = item.get("content", [{}])[0].get("text")
-            if new_text and new_text not in text_contents:
-                text_contents.append(new_text)
-    return text_contents
+            text = item.get("content", [{}])[0].get("text")
+            if text:
+                last_text = text
+    return [last_text] if last_text else []
+
+
+def extract_all_tool_calls(response_json: dict) -> list[dict]:
+    """Extract tool calls from ALL message outputs (not just the last one)."""
+    all_tool_calls = []
+    for item in response_json.get("output", []):
+        if item.get("type") == "message":
+            text = item.get("content", [{}])[0].get("text")
+            if text:
+                all_tool_calls.extend(parse_tool_calls(text))
+    return all_tool_calls
 
 
 # ---------------------------------------------------------------------------
