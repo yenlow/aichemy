@@ -170,7 +170,7 @@ zinc_agent = create_agent(
 from databricks_langchain import DatabricksMultiServerMCPClient, DatabricksMCPServer, MCPServer
 
 servers = [
-    MCPServer(
+    DatabricksMCPServer(
         name="pubchem",
         url=f'{cfg.get("host")}api/2.0/mcp/external/{cfg.get("uc_connections").get("pubchem")}',
         workspace_client=ws_client,
