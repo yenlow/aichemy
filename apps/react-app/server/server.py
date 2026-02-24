@@ -565,8 +565,7 @@ async def call_agent(request: AgentRequest):
         all_tool_calls = []
         cleaned_texts = []
         if text_contents:
-            # Agent appends according to thread_id; use the last entry
-            for tc_text in [text_contents[-1]]:
+            for tc_text in text_contents:
                 all_tool_calls.extend(parse_tool_calls(tc_text))
                 cleaned = strip_tool_call_tags(tc_text)
                 if cleaned:
@@ -657,11 +656,13 @@ async def call_agent_stream(request: AgentRequest):
             all_tool_calls = []
             cleaned_text = ""
             if text_contents:
-                for tc_text in [text_contents[-1]]:
+                cleaned_parts = []
+                for tc_text in text_contents:
                     all_tool_calls.extend(parse_tool_calls(tc_text))
                     cleaned = strip_tool_call_tags(tc_text)
                     if cleaned:
-                        cleaned_text = cleaned
+                        cleaned_parts.append(cleaned)
+                cleaned_text = "\n\n".join(cleaned_parts)
 
             # Stream the text word-by-word for typewriter effect
             if cleaned_text:
@@ -757,9 +758,10 @@ def parse_tool_calls(text_content: str) -> list[dict]:
 
 
 def strip_tool_call_tags(text_content: str) -> str:
-    """Strip <function_calls> and <thinking> tags from text."""
+    """Strip <function_calls>, <thinking>, and <results> tags from text."""
     text_content = re.sub(r'<function_calls>\s*.*?\s*</function_calls>', '', text_content, flags=re.DOTALL)
     text_content = re.sub(r'<thinking>\s*.*?\s*</thinking>', '', text_content, flags=re.DOTALL)
+    text_content = re.sub(r'<results>\s*.*?\s*</results>', '', text_content, flags=re.DOTALL)
     text_content = re.sub(r'\n\s*\n\s*\n+', '\n\n', text_content)
     return text_content.strip()
 
