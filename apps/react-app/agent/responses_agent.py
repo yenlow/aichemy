@@ -150,6 +150,10 @@ class WrappedAgent(ResponsesAgent):
                         if len(node_data.get("messages", [])) > 0:
                             unique_messages = []
                             for msg in node_data["messages"]:
+                                msg_type = type(msg).__name__
+                                has_tc = bool(getattr(msg, "tool_calls", None)) if isinstance(msg, AIMessage) else False
+                                logger.info("[agent-stream] node=%s msg_type=%s has_tool_calls=%s id=%s",
+                                           node_name, msg_type, has_tc, getattr(msg, "id", "?")[:20])
                                 msg_id = getattr(msg, "id", None)
                                 if msg_id and msg_id in seen_msg_ids:
                                     continue
@@ -190,6 +194,7 @@ class WrappedAgent(ResponsesAgent):
 
                 # After streaming completes, emit collected tool calls as a tagged message
                 # so the web server can parse them into the Agent Activity panel.
+                logger.info("[agent-stream] Stream complete. Collected %d tool calls", len(_tool_calls))
                 if _tool_calls:
                     tc_msg = AIMessage(
                         content=f"__TOOL_CALLS_JSON__{json.dumps(_tool_calls)}__END_TOOL_CALLS__"
