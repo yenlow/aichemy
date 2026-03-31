@@ -5,7 +5,6 @@ import ChatPanel from './components/ChatPanel'
 import AgentPanel from './components/AgentPanel'
 import {
   askAgentStream,
-  fetchUserInfo,
   fetchDbStatus,
   fetchMcpStatus,
   listProjects,
@@ -94,8 +93,16 @@ export default function App() {
   const [selectedWorkflow, setSelectedWorkflow] = useState(null)
   const [skillsEnabled, setSkillsEnabled] = useState(false)
 
-  // User identity (fetched from backend on mount)
-  const [userInfo, setUserInfo] = useState({ user_id: null, user_name: '', user_email: '' })
+  // User identity (anonymous session — unique per browser)
+  const [userInfo, setUserInfo] = useState(() => {
+    const STORAGE_KEY = 'aichemy_session'
+    let session = null
+    try { session = JSON.parse(localStorage.getItem(STORAGE_KEY)) } catch {}
+    if (session?.user_id) return session
+    const newSession = { user_id: `anon-${uuidv4()}`, user_name: 'Guest', user_email: '' }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(newSession)) } catch {}
+    return newSession
+  })
 
   // DB backend status
   const [dbStatus, setDbStatus] = useState(null)
@@ -120,11 +127,10 @@ export default function App() {
   useEffect(() => {
     async function init() {
       try {
-        const [user, status, mcp] = await Promise.all([fetchUserInfo(), fetchDbStatus(), fetchMcpStatus()])
-        setUserInfo(user)
+        const [status, mcp] = await Promise.all([fetchDbStatus(), fetchMcpStatus()])
         setDbStatus(status)
         setMcpStatus(mcp)
-        const list = await listProjects(user.user_id)
+        const list = await listProjects(userInfo.user_id)
         setProjects(list)
         if (list.length > 0) {
           await switchToProject(list[0].id)
