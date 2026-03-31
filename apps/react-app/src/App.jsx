@@ -248,9 +248,8 @@ export default function App() {
     setSelectedWorkflow(null)
     setIsLoading(false)
     setStatusMessage('')
-    // Generate a new project/thread ID so the agent starts with a fresh
-    // conversation history (the LangGraph checkpointer keys on thread_id).
-    setCurrentProjectId(uuidv4())
+    // Create a new project on the backend so auto-save doesn't 404
+    await handleNewProject()
   }
 
   const handleStop = () => {
