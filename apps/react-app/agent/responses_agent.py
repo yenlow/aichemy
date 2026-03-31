@@ -100,7 +100,7 @@ class WrappedAgent(ResponsesAgent):
 
             cc_msgs = to_chat_completions_input([i.model_dump() for i in request.input])
             ci = dict(request.custom_inputs or {})
-            recursion_limit = ci.get("recursion_limit", 10)
+            recursion_limit = ci.get("recursion_limit", 12)
             thread_id = ci.get("thread_id", str(uuid4()))
             user_id = get_user_id(request)
 
@@ -232,11 +232,7 @@ class WrappedAgent(ResponsesAgent):
                         yield item
             except Exception as e:
                 logger.exception("Error during agent streaming")
-                if "RecursionLimit" in type(e).__name__ or "recursion" in str(e).lower():
-                    friendly = ("I ran out of processing steps for this request. "
-                                "Try breaking your question into smaller parts, or ask something more specific.")
-                else:
-                    friendly = f"**Agent error:** `{type(e).__name__}`: {e}"
+                is_recursion = "RecursionLimit" in type(e).__name__ or "recursion" in str(e).lower()
                 # Emit partial tool calls collected before the error
                 if _tool_calls:
                     tc_msg = AIMessage(
@@ -247,9 +243,20 @@ class WrappedAgent(ResponsesAgent):
                             yield item
                     except (StopIteration, RuntimeError):
                         pass
-                error_msg = AIMessage(content=friendly)
-                for item in output_to_responses_items_stream([error_msg]):
-                    yield item
+                # For recursion limit: if a sub-agent already responded, silently
+                # stop — the user already has useful content. Only show the error
+                # if nothing was produced.
+                if is_recursion and _subagent_responded:
+                    logger.info("Recursion limit hit but sub-agent already responded — suppressing error")
+                else:
+                    if is_recursion:
+                        friendly = ("I ran out of processing steps for this request. "
+                                    "Try breaking your question into smaller parts, or ask something more specific.")
+                    else:
+                        friendly = f"**Agent error:** `{type(e).__name__}`: {e}"
+                    error_msg = AIMessage(content=friendly)
+                    for item in output_to_responses_items_stream([error_msg]):
+                        yield item
 
     # Stream predictions for the agent, yielding output as it's generated
     def predict_stream(
