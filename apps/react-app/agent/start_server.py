@@ -18,7 +18,8 @@ from agent.utils import init_mlflow, load_env_from_app_yaml
 
 load_env_from_app_yaml()
 init_mlflow()
-mlflow.langchain.autolog()
+if not os.environ.get("DISABLE_MLFLOW_AUTOLOGGING"):
+    mlflow.langchain.autolog()
 
 # Import agent to register @invoke / @stream with the server
 try:
