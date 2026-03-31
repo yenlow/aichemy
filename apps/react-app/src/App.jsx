@@ -140,8 +140,14 @@ export default function App() {
         }
       } catch (err) {
         console.error('Failed to load projects:', err)
-        setCurrentProjectId(uuidv4())
-        setCurrentProjectName('Project 1')
+        // Still try to create a real project so auto-save doesn't 404
+        try {
+          await handleNewProject('Project 1')
+        } catch {
+          // Last resort: local-only ID (auto-save will 404 but chat still works)
+          setCurrentProjectId(uuidv4())
+          setCurrentProjectName('Project 1')
+        }
       }
     }
     init()
