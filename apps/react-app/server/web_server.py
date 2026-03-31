@@ -602,14 +602,20 @@ async def call_agent_stream(request: AgentRequest):
                     yield _sse({"type": "error", "content": f"Failed to extract output from trace: {e}"})
             elif not accumulated_output:
                 yield _sse({"type": "error", "content": "Agent stream ended without producing output. Check agent logs for details."})
-            elif trace_id:
-                # Normal path: SSE parsing worked, parse trace for tool_calls/genie
+            # Extract tool calls from accumulated SSE items (works without MLflow traces)
+            if accumulated_output:
+                items_tool_calls = extract_tool_calls_from_items(accumulated_output)
+                if items_tool_calls:
+                    print(f"[stream] Extracted {len(items_tool_calls)} tool calls from items")
+                    yield _sse({"type": "tool_calls", "data": items_tool_calls})
+
+            # Fallback: parse trace for genie results and additional tool calls
+            if trace_id:
                 try:
                     trace = get_trace(trace_id, retries=3, delay=1.0)
                     if trace:
                         parsed = parse_trace_for_ui(_serialize_trace(trace))
-                        print(f"parsed: {parsed}")
-                        if parsed["tool_calls"]:
+                        if not items_tool_calls and parsed["tool_calls"]:
                             yield _sse({"type": "tool_calls", "data": parsed["tool_calls"]})
                         if parsed["genie_results"]:
                             yield _sse({"type": "genie", "data": parsed["genie_results"]})
@@ -835,6 +841,39 @@ def extract_all_tool_calls(trace_dict: dict) -> list[dict]:
                         "results": results
                     })
     return all_tool_calls
+
+
+def extract_tool_calls_from_items(items: list[dict]) -> list[dict]:
+    """Extract tool calls from accumulated Responses API items (no MLflow trace needed).
+
+    Pairs function_call items with their function_call_output items by call_id.
+    Returns the same format as extract_all_tool_calls().
+    """
+    calls = {}
+    for item in items:
+        item_type = item.get("type")
+        if item_type == "function_call":
+            call_id = item.get("call_id")
+            try:
+                args = json.loads(item.get("arguments", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                args = {"raw": item.get("arguments", "")}
+            calls[call_id] = {
+                "function_name": item.get("name", "unknown"),
+                "parameters": args,
+                "results": None,
+            }
+        elif item_type == "function_call_output":
+            call_id = item.get("call_id")
+            if call_id in calls:
+                calls[call_id]["results"] = item.get("output")
+            else:
+                calls[call_id] = {
+                    "function_name": "unknown",
+                    "parameters": {},
+                    "results": item.get("output"),
+                }
+    return list(calls.values())
 
 
 def parse_trace_for_ui(trace_dict: dict) -> dict:

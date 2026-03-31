@@ -59,6 +59,11 @@ def init_mlflow():
     mlflow.set_registry_uri(registry_uri)
     mlflow.set_experiment(experiment_id=str(experiment_id).strip())
 
+    # On non-Databricks hosts (e.g., Render), disable autologging to avoid
+    # noisy ContextVar warnings when trace storage is inaccessible.
+    if os.environ.get("DISABLE_MLFLOW_AUTOLOGGING"):
+        mlflow.autolog(disable=True)
+
 
 def get_secret(scope: str, key: str) -> str:
     """Get a secret. Checks SECRET_<SCOPE>_<KEY> env var first, then Databricks secrets API."""
