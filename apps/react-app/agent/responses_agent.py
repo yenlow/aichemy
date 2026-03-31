@@ -227,7 +227,22 @@ class WrappedAgent(ResponsesAgent):
                         yield item
             except Exception as e:
                 logger.exception("Error during agent streaming")
-                error_msg = AIMessage(content=f"**Agent error:** `{type(e).__name__}`: {e}")
+                if "RecursionLimit" in type(e).__name__ or "recursion" in str(e).lower():
+                    friendly = ("I ran out of processing steps for this request. "
+                                "Try breaking your question into smaller parts, or ask something more specific.")
+                else:
+                    friendly = f"**Agent error:** `{type(e).__name__}`: {e}"
+                # Emit partial tool calls collected before the error
+                if _tool_calls:
+                    tc_msg = AIMessage(
+                        content=f"__TOOL_CALLS_JSON__{json.dumps(_tool_calls)}__END_TOOL_CALLS__"
+                    )
+                    try:
+                        for item in output_to_responses_items_stream([tc_msg]):
+                            yield item
+                    except (StopIteration, RuntimeError):
+                        pass
+                error_msg = AIMessage(content=friendly)
                 for item in output_to_responses_items_stream([error_msg]):
                     yield item
 

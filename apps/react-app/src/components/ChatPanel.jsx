@@ -36,6 +36,7 @@ export default function ChatPanel({
   onStop,
   isLoading,
   statusMessage,
+  statusLog = [],
   chatHistoryRef,
   selectedWorkflow,
   onClearWorkflow,
@@ -137,13 +138,24 @@ export default function ChatPanel({
           </div>
         ))}
 
-        {/* Status / Thinking indicator */}
+        {/* Status / Thinking indicator with step log */}
         {isLoading && (
           <div className="status-bar">
-            <span className="spinner" />
-            <span className="status-text">{statusMessage || 'Thinking...'}</span>
-            <ElapsedTimer />
-            <button className="stop-button" onClick={onStop}>Stop</button>
+            <div className="status-main-row">
+              <span className="spinner" />
+              <span className="status-text">{statusMessage || 'Thinking...'}</span>
+              <ElapsedTimer />
+              <button className="stop-button" onClick={onStop}>Stop</button>
+            </div>
+            {statusLog.length > 0 && (
+              <div className="status-log">
+                {statusLog.map((step, i) => (
+                  <span key={i} className="status-step">
+                    {step.includes('Routing') ? '🔀' : '🔧'} {step}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

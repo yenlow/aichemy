@@ -811,7 +811,7 @@ def stream_new_content(item: Optional[dict], _sse):
                     for i, word in enumerate(words):
                         chunk = word + (" " if i < len(words) - 1 else "")
                         yield _sse({"type": "text", "content": chunk})
-                        time.sleep(0.02)
+                        time.sleep(0.005)
 
 
 def parse_genie_results(trace_dict: dict) -> list[dict]:

@@ -83,6 +83,7 @@ export default function App() {
   const [messages, setMessages] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
+  const [statusLog, setStatusLog] = useState([])
   const [abortController, setAbortController] = useState(null)
 
   // Agent activity state
@@ -283,6 +284,7 @@ export default function App() {
 
     setIsLoading(true)
     setSelectedWorkflow(null)
+    setStatusLog([])
 
     // Add user message + placeholder assistant message for streaming
     const userMessage = { role: 'user', content: prompt }
@@ -307,6 +309,10 @@ export default function App() {
         signal: controller.signal,
         onStatus: (msg) => {
           setStatusMessage(msg)
+          // Accumulate tool/routing steps (skip generic status messages)
+          if (msg && (msg.includes('Calling') || msg.includes('Routing'))) {
+            setStatusLog(prev => [...prev, msg])
+          }
         },
         onText: (chunk) => {
           setStatusMessage('')  // clear status once text starts flowing
@@ -395,6 +401,7 @@ export default function App() {
           onStop={handleStop}
           isLoading={isLoading}
           statusMessage={statusMessage}
+          statusLog={statusLog}
           chatHistoryRef={chatHistoryRef}
           selectedWorkflow={selectedWorkflow}
           onClearWorkflow={() => setSelectedWorkflow(null)}
