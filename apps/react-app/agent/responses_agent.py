@@ -78,7 +78,7 @@ class WrappedAgent(ResponsesAgent):
         self,
         request: ResponsesAgentRequest,
     ) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
-        print("[agent-stream] _predict_stream_async ENTERED", flush=True)
+        import sys as _sys; print("[agent-stream] _predict_stream_async ENTERED", file=_sys.stderr, flush=True)
         from uuid import uuid4
 
         lakebase_kwargs = dict(
@@ -153,7 +153,7 @@ class WrappedAgent(ResponsesAgent):
                             for msg in node_data["messages"]:
                                 msg_type = type(msg).__name__
                                 has_tc = bool(getattr(msg, "tool_calls", None)) if isinstance(msg, AIMessage) else False
-                                print(f"[agent-stream] node={node_name} msg_type={msg_type} has_tool_calls={has_tc} id={str(getattr(msg, 'id', '?'))[:20]}", flush=True)
+                                print(f"[agent-stream] node={node_name} msg_type={msg_type} has_tool_calls={has_tc} id={str(getattr(msg, 'id', '?'))[:20]}", file=_sys.stderr, flush=True)
                                 msg_id = getattr(msg, "id", None)
                                 if msg_id and msg_id in seen_msg_ids:
                                     continue
@@ -194,7 +194,7 @@ class WrappedAgent(ResponsesAgent):
 
                 # After streaming completes, emit collected tool calls as a tagged message
                 # so the web server can parse them into the Agent Activity panel.
-                print(f"[agent-stream] Stream complete. Collected {len(_tool_calls)} tool calls", flush=True)
+                print(f"[agent-stream] Stream complete. Collected {len(_tool_calls)} tool calls", file=_sys.stderr, flush=True)
                 if _tool_calls:
                     tc_msg = AIMessage(
                         content=f"__TOOL_CALLS_JSON__{json.dumps(_tool_calls)}__END_TOOL_CALLS__"
