@@ -242,14 +242,9 @@ export default function App() {
     setSelectedWorkflow(null)
     setIsLoading(false)
     setStatusMessage('')
-    if (currentProjectId) {
-      saveProject(currentProjectId, {
-        messages: [],
-        agent_steps: { toolCallGroups: [], genieGroups: [] },
-      }).catch(err =>
-        console.error('Failed to save reset:', err)
-      )
-    }
+    // Generate a new project/thread ID so the agent starts with a fresh
+    // conversation history (the LangGraph checkpointer keys on thread_id).
+    setCurrentProjectId(uuidv4())
   }
 
   const handleStop = () => {
