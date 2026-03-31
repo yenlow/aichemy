@@ -132,55 +132,56 @@ class WrappedAgent(ResponsesAgent):
             # mode, which would leak the supervisor's intermediate reasoning/hallucinations).
             seen_msg_ids: set[str] = set()
             seen_item_ids: set[str] = set()
-            # Collect tool calls from sub-agent messages for the Agent Activity panel
+            # Collect tool calls from the "messages" stream mode which captures
+            # intermediate tool calls inside sub-agents (not visible in "updates" mode).
             _tool_calls: list[dict] = []
+            import sys as _sys
 
             try:
-                async for event in self.agent.astream(
-                    inputs, config=config, stream_mode="updates"
+                async for mode, event in self.agent.astream(
+                    inputs, config=config, stream_mode=["updates", "messages"]
                 ):
+                    if mode == "messages":
+                        # "messages" mode yields (message, metadata) tuples
+                        msg, metadata = event
+                        # Collect tool calls from intermediate AIMessages
+                        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+                            for tc in msg.tool_calls:
+                                _tool_calls.append({
+                                    "call_id": tc.get("id", ""),
+                                    "function_name": tc.get("name", "unknown"),
+                                    "parameters": tc.get("args", {}),
+                                    "results": None,
+                                })
+                        # Collect tool results
+                        if isinstance(msg, ToolMessage):
+                            tc_id = getattr(msg, "tool_call_id", None)
+                            if tc_id:
+                                for tc in _tool_calls:
+                                    if tc["call_id"] == tc_id:
+                                        content = msg.content
+                                        if not isinstance(content, str):
+                                            content = json.dumps(content)
+                                        tc["results"] = content
+                                        break
+                        continue  # Don't yield "messages" events as response items
+
+                    # mode == "updates": process as before for response streaming
                     for node_name, node_data in event.items():
                         if node_data is None or not isinstance(node_data, dict):
                             continue
-                        # Skip the supervisor's own messages — they may contain
-                        # hallucinated summaries. The graph's output_mode="last_message"
-                        # ensures the sub-agent's final answer is the authoritative output;
-                        # honour that by only surfacing sub-agent messages.
                         if node_name == "supervisor":
                             continue
                         if len(node_data.get("messages", [])) > 0:
                             unique_messages = []
                             for msg in node_data["messages"]:
-                                msg_type = type(msg).__name__
-                                has_tc = bool(getattr(msg, "tool_calls", None)) if isinstance(msg, AIMessage) else False
-                                print(f"[agent-stream] node={node_name} msg_type={msg_type} has_tool_calls={has_tc} id={str(getattr(msg, 'id', '?'))[:20]}", file=_sys.stderr, flush=True)
                                 msg_id = getattr(msg, "id", None)
                                 if msg_id and msg_id in seen_msg_ids:
                                     continue
                                 if msg_id:
                                     seen_msg_ids.add(msg_id)
-                                # Collect tool calls from AIMessage for Agent Activity
-                                if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
-                                    for tc in msg.tool_calls:
-                                        _tool_calls.append({
-                                            "call_id": tc.get("id", ""),
-                                            "function_name": tc.get("name", "unknown"),
-                                            "parameters": tc.get("args", {}),
-                                            "results": None,
-                                        })
-                                # Collect tool results and pair with their calls
-                                if isinstance(msg, ToolMessage):
-                                    tc_id = getattr(msg, "tool_call_id", None)
-                                    if tc_id:
-                                        for tc in _tool_calls:
-                                            if tc["call_id"] == tc_id:
-                                                content = msg.content
-                                                if not isinstance(content, str):
-                                                    content = json.dumps(content)
-                                                tc["results"] = content
-                                                break
-                                    if not isinstance(msg.content, str):
-                                        msg.content = json.dumps(msg.content)
+                                if isinstance(msg, ToolMessage) and not isinstance(msg.content, str):
+                                    msg.content = json.dumps(msg.content)
                                 unique_messages.append(msg)
                             for item in output_to_responses_items_stream(unique_messages):
                                 item_id = getattr(item, "item_id", None) or (
@@ -192,8 +193,7 @@ class WrappedAgent(ResponsesAgent):
                                     seen_item_ids.add(item_id)
                                 yield item
 
-                # After streaming completes, emit collected tool calls as a tagged message
-                # so the web server can parse them into the Agent Activity panel.
+                # Emit collected tool calls as a tagged message for the web server
                 print(f"[agent-stream] Stream complete. Collected {len(_tool_calls)} tool calls", file=_sys.stderr, flush=True)
                 if _tool_calls:
                     tc_msg = AIMessage(
