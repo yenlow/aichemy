@@ -135,6 +135,7 @@ class WrappedAgent(ResponsesAgent):
             # Collect tool calls from the "messages" stream mode which captures
             # intermediate tool calls inside sub-agents (not visible in "updates" mode).
             _tool_calls: list[dict] = []
+            _subagent_responded = False  # Track if any sub-agent yielded content
             import sys as _sys
 
             try:
@@ -184,15 +185,17 @@ class WrappedAgent(ResponsesAgent):
                     for node_name, node_data in event.items():
                         if node_data is None or not isinstance(node_data, dict):
                             continue
-                        # Skip supervisor routing decisions (messages with tool calls),
-                        # but allow direct supervisor responses (no tool calls) through.
+                        # Skip supervisor messages: always skip routing (tool_calls),
+                        # and skip follow-up questions if a sub-agent already responded.
+                        # Only allow supervisor messages through when it responds directly
+                        # without routing to any sub-agent (e.g. "you're welcome").
                         if node_name == "supervisor":
                             msgs = node_data.get("messages", [])
-                            has_only_routing = all(
+                            has_routing = any(
                                 isinstance(m, AIMessage) and getattr(m, "tool_calls", None)
                                 for m in msgs if isinstance(m, AIMessage)
                             )
-                            if has_only_routing:
+                            if has_routing or _subagent_responded:
                                 continue
                         if len(node_data.get("messages", [])) > 0:
                             unique_messages = []
@@ -207,6 +210,8 @@ class WrappedAgent(ResponsesAgent):
                                 unique_messages.append(msg)
                             if not unique_messages:
                                 continue
+                            if node_name != "supervisor":
+                                _subagent_responded = True
                             for item in output_to_responses_items_stream(unique_messages):
                                 item_id = getattr(item, "item_id", None) or (
                                     getattr(item, "item", None) and getattr(item.item, "id", None)
