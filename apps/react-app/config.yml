@@ -17,7 +17,7 @@ uc_functions:
 #   opentargets: conn_aichemy_opentargets
 external_mcp:
   pubchem: https://glama.ai/endpoints/xb306rnopq/mcp
-  pubmed: https://glama.ai/endpoints/mp1ke6xrpi/mcp
+  pubmed: https://pubmed.caseyjhand.com/mcp
   opentargets: https://mcp.platform.opentargets.org/mcp
 retriever:
   zinc_molecular_search:
