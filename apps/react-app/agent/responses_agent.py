@@ -160,10 +160,13 @@ class WrappedAgent(ResponsesAgent):
                                     status = f"__STATUS__Routing to {agent_name}..."
                                 else:
                                     status = f"__STATUS__Calling {tool_name}..."
-                                for item in output_to_responses_items_stream(
-                                    [AIMessage(content=status)]
-                                ):
-                                    yield item
+                                try:
+                                    for item in output_to_responses_items_stream(
+                                        [AIMessage(content=status)]
+                                    ):
+                                        yield item
+                                except (StopIteration, RuntimeError):
+                                    pass
                         # Collect tool results
                         if isinstance(msg, ToolMessage):
                             tc_id = getattr(msg, "tool_call_id", None)
@@ -202,6 +205,8 @@ class WrappedAgent(ResponsesAgent):
                                 if isinstance(msg, ToolMessage) and not isinstance(msg.content, str):
                                     msg.content = json.dumps(msg.content)
                                 unique_messages.append(msg)
+                            if not unique_messages:
+                                continue
                             for item in output_to_responses_items_stream(unique_messages):
                                 item_id = getattr(item, "item_id", None) or (
                                     getattr(item, "item", None) and getattr(item.item, "id", None)
