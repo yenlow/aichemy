@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: aichemy
+    runtime: docker
+    dockerfilePath: apps/react-app/Dockerfile
+    dockerContext: apps/react-app
+    plan: standard
+    envVars:
+      - key: DATABRICKS_HOST
+        value: https://e2-demo-west.cloud.databricks.com/
+      - key: DATABRICKS_TOKEN
+        sync: false
+      - key: SECRET_AICHEMY_CLIENT_ID
+        sync: false
+      - key: SECRET_AICHEMY_CLIENT_SECRET
+        sync: false
+      - key: SECRET_AICHEMY_PUBMED_GLAMA_API
+        sync: false
+      - key: SECRET_AICHEMY_PUBCHEM_GLAMA_API
+        sync: false
+      - key: AGENT_PORT
+        value: "8080"
+      - key: AGENT_CONNECT_TIMEOUT
+        value: "60"
+      - key: AGENT_READ_TIMEOUT
+        value: "600"
+      - key: DATABRICKS_APP_PORT
+        value: "10000"

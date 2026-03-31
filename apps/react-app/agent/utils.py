@@ -61,9 +61,24 @@ def init_mlflow():
 
 
 def get_secret(scope: str, key: str) -> str:
+    """Get a secret. Checks SECRET_<SCOPE>_<KEY> env var first, then Databricks secrets API."""
+    env_name = f"SECRET_{scope}_{key}".upper().replace("-", "_")
+    env_val = os.environ.get(env_name)
+    if env_val:
+        return env_val
     w0 = WorkspaceClient()
     secret_base64 = w0.secrets.get_secret(scope, key).value
     return b64decode(secret_base64).decode("utf-8")
+
+
+def make_sp_client(host, client_id, client_secret):
+    """Create a WorkspaceClient with SP OAuth, suppressing any PAT from env."""
+    saved_token = os.environ.pop("DATABRICKS_TOKEN", None)
+    try:
+        return WorkspaceClient(host=host, client_id=client_id, client_secret=client_secret)
+    finally:
+        if saved_token is not None:
+            os.environ["DATABRICKS_TOKEN"] = saved_token
 
 
 def init_workspace_client(cfg):
@@ -71,11 +86,7 @@ def init_workspace_client(cfg):
     client_id = get_secret(scope='aichemy', key='client_id')
     client_secret = get_secret(scope='aichemy', key='client_secret')
     try:
-        ws_client = WorkspaceClient(
-            host=cfg["host"],
-            client_id=client_id,
-            client_secret=client_secret
-        )
+        ws_client = make_sp_client(cfg["host"], client_id, client_secret)
     except Exception as e:
         print(f"Error initializing workspace client with SP. Using WorkspaceClient() instead: {e}")
         ws_client = WorkspaceClient()

@@ -98,11 +98,7 @@ class ProjectDB:
             if not (sp_client_id and sp_client_secret):
                 raise RuntimeError("SP credentials not found in secrets")
 
-            self._sp_client = WorkspaceClient(
-                host=self._host,
-                client_id=sp_client_id,
-                client_secret=sp_client_secret,
-            )
+            self._sp_client = make_sp_client(self._host, sp_client_id, sp_client_secret)
 
             endpoint = self._sp_client.postgres.get_endpoint(name=self._lakebase_endpoint_name)
             self._lakebase_host = endpoint.status.hosts.host
@@ -314,7 +310,7 @@ app = FastAPI(title="AiChemy API Proxy")
 # CORS for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:8080", "http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5173", "https://*.onrender.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1263,11 +1259,7 @@ async def debug_lakebase(request: Request):
     # Step 3: SP-authenticated WorkspaceClient
     try:
         host = (cfg or {}).get("host")
-        sp_client = WorkspaceClient(
-            host=host,
-            client_id=sp_client_id,
-            client_secret=sp_client_secret,
-        )
+        sp_client = make_sp_client(host, sp_client_id, sp_client_secret)
         steps["3_sp_client"] = {"ok": True, "host": host}
     except Exception as e:
         steps["3_sp_client"] = {"ok": False, "error": str(e)}
@@ -1346,5 +1338,5 @@ else:
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("DATABRICKS_APP_PORT", "8010"))
+    port = int(os.getenv("PORT", os.getenv("DATABRICKS_APP_PORT", "8010")))
     uvicorn.run(app, host="0.0.0.0", port=port)
