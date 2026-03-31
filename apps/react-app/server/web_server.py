@@ -561,15 +561,27 @@ async def call_agent_stream(request: AgentRequest):
             print(f"[stream] SSE event types received: {seen_event_types}")
             print(f"[stream] accumulated_output items: {len(accumulated_output)}, trace_id: {trace_id}")
 
-            # Existing thread: stream only the last message item to avoid repeating previous responses
+            # Existing thread: stream only the last message item to avoid repeating previous responses.
+            # Skip __TOOL_CALLS_JSON__ tagged items — those are metadata, not the real response.
             if not is_new_thread and accumulated_output:
+                def _is_real_message(it):
+                    if it.get("type") != "message":
+                        return False
+                    for b in it.get("content") or []:
+                        if b.get("type") == "output_text":
+                            text = b.get("text", "")
+                            if "__TOOL_CALLS_JSON__" in text:
+                                return False
+                            if strip_tool_call_tags(text).strip():
+                                return True
+                    return False
+
                 last_msg = next(
-                    (it for it in reversed(accumulated_output)
-                     if it.get("type") == "message"
-                     and any(b.get("type") == "output_text" for b in it.get("content") or [])),
-                    accumulated_output[-1],
+                    (it for it in reversed(accumulated_output) if _is_real_message(it)),
+                    None,
                 )
-                yield from stream_new_content(last_msg, _sse)
+                if last_msg:
+                    yield from stream_new_content(last_msg, _sse)
 
             # Emit trace_id so the frontend can render the link
             if trace_id:
