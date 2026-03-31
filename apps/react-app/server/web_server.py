@@ -1182,7 +1182,7 @@ def _get_mcp_servers() -> dict[str, str]:
     return _MCP_SERVERS
 
 
-def _check_mcp_server(name: str, url: str, timeout: float = 5.0) -> dict:
+def _check_mcp_server(name: str, url: str, timeout: float = 15.0) -> dict:
     """Ping an MCP server with a proper JSON-RPC initialize request.
 
     Categorises the result as:
