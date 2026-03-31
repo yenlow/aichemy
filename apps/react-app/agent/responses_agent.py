@@ -170,8 +170,16 @@ class WrappedAgent(ResponsesAgent):
                     for node_name, node_data in event.items():
                         if node_data is None or not isinstance(node_data, dict):
                             continue
+                        # Skip supervisor routing decisions (messages with tool calls),
+                        # but allow direct supervisor responses (no tool calls) through.
                         if node_name == "supervisor":
-                            continue
+                            msgs = node_data.get("messages", [])
+                            has_only_routing = all(
+                                isinstance(m, AIMessage) and getattr(m, "tool_calls", None)
+                                for m in msgs if isinstance(m, AIMessage)
+                            )
+                            if has_only_routing:
+                                continue
                         if len(node_data.get("messages", [])) > 0:
                             unique_messages = []
                             for msg in node_data["messages"]:
