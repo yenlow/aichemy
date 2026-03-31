@@ -126,6 +126,11 @@ def get_trace(trace_id: str, retries: int = 5, delay: float = 2.0):
                 print(f"[get_trace] Attempt {attempt+1}/{retries}: trace not found yet, retrying...")
         except Exception as e:
             print(f"[get_trace] Attempt {attempt+1}/{retries}: exception {type(e).__name__}: {e}, retrying...")
+            # Don't retry on permanent errors (403 AccessDenied, 401 Unauthorized)
+            err_str = str(e)
+            if "403" in err_str or "401" in err_str or "AccessDenied" in err_str:
+                print(f"[get_trace] Permanent auth error, skipping remaining retries")
+                return None
         if attempt < retries - 1:
             time.sleep(delay)
     # Last-ditch: return whatever we have (may be incomplete)
