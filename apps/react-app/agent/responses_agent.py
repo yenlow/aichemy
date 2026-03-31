@@ -131,6 +131,8 @@ class WrappedAgent(ResponsesAgent):
             # mode, which would leak the supervisor's intermediate reasoning/hallucinations).
             seen_msg_ids: set[str] = set()
             seen_item_ids: set[str] = set()
+            # Collect tool calls from sub-agent messages for the Agent Activity panel
+            _tool_calls: list[dict] = []
 
             try:
                 async for event in self.agent.astream(
@@ -153,8 +155,28 @@ class WrappedAgent(ResponsesAgent):
                                     continue
                                 if msg_id:
                                     seen_msg_ids.add(msg_id)
-                                if isinstance(msg, ToolMessage) and not isinstance(msg.content, str):
-                                    msg.content = json.dumps(msg.content)
+                                # Collect tool calls from AIMessage for Agent Activity
+                                if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+                                    for tc in msg.tool_calls:
+                                        _tool_calls.append({
+                                            "call_id": tc.get("id", ""),
+                                            "function_name": tc.get("name", "unknown"),
+                                            "parameters": tc.get("args", {}),
+                                            "results": None,
+                                        })
+                                # Collect tool results and pair with their calls
+                                if isinstance(msg, ToolMessage):
+                                    tc_id = getattr(msg, "tool_call_id", None)
+                                    if tc_id:
+                                        for tc in _tool_calls:
+                                            if tc["call_id"] == tc_id:
+                                                content = msg.content
+                                                if not isinstance(content, str):
+                                                    content = json.dumps(content)
+                                                tc["results"] = content
+                                                break
+                                    if not isinstance(msg.content, str):
+                                        msg.content = json.dumps(msg.content)
                                 unique_messages.append(msg)
                             for item in output_to_responses_items_stream(unique_messages):
                                 item_id = getattr(item, "item_id", None) or (
@@ -165,6 +187,15 @@ class WrappedAgent(ResponsesAgent):
                                 if item_id:
                                     seen_item_ids.add(item_id)
                                 yield item
+
+                # After streaming completes, emit collected tool calls as a tagged message
+                # so the web server can parse them into the Agent Activity panel.
+                if _tool_calls:
+                    tc_msg = AIMessage(
+                        content=f"__TOOL_CALLS_JSON__{json.dumps(_tool_calls)}__END_TOOL_CALLS__"
+                    )
+                    for item in output_to_responses_items_stream([tc_msg]):
+                        yield item
             except Exception as e:
                 logger.exception("Error during agent streaming")
                 error_msg = AIMessage(content=f"**Agent error:** `{type(e).__name__}`: {e}")

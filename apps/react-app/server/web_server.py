@@ -602,11 +602,27 @@ async def call_agent_stream(request: AgentRequest):
                     yield _sse({"type": "error", "content": f"Failed to extract output from trace: {e}"})
             elif not accumulated_output:
                 yield _sse({"type": "error", "content": "Agent stream ended without producing output. Check agent logs for details."})
-            # Extract tool calls from accumulated SSE items (works without MLflow traces)
+            # Extract tool calls from the agent's tagged message in accumulated_output
+            items_tool_calls = []
             if accumulated_output:
-                items_tool_calls = extract_tool_calls_from_items(accumulated_output)
+                # First try: extract from __TOOL_CALLS_JSON__ marker emitted by WrappedAgent
+                for item in accumulated_output:
+                    for block in item.get("content") or []:
+                        text = block.get("text", "")
+                        match = _TOOL_CALLS_RE.search(text)
+                        if match:
+                            try:
+                                items_tool_calls = json.loads(match.group(1))
+                                print(f"[stream] Extracted {len(items_tool_calls)} tool calls from agent stream")
+                            except json.JSONDecodeError:
+                                pass
+                # Second try: extract from function_call/function_call_output items
+                if not items_tool_calls:
+                    items_tool_calls = extract_tool_calls_from_items(accumulated_output)
+                    if items_tool_calls:
+                        print(f"[stream] Extracted {len(items_tool_calls)} tool calls from SSE items")
+
                 if items_tool_calls:
-                    print(f"[stream] Extracted {len(items_tool_calls)} tool calls from items")
                     yield _sse({"type": "tool_calls", "data": items_tool_calls})
 
             # Fallback: parse trace for genie results and additional tool calls
@@ -744,12 +760,16 @@ async def delete_project(project_id: str):
 # ---------------------------------------------------------------------------
 # Response parsing helpers (mirrors Streamlit utils.py)
 # ---------------------------------------------------------------------------
+_TOOL_CALLS_RE = re.compile(r'__TOOL_CALLS_JSON__(.*?)__END_TOOL_CALLS__', re.DOTALL)
+
+
 def strip_tool_call_tags(text_content: str) -> str:
-    """Strip <function_calls>, <thinking>, and <results> tags from text."""
+    """Strip <function_calls>, <thinking>, <results>, and tool call JSON tags from text."""
     text_content = re.sub(r'<function_calls>.*?</function_calls>', '', text_content, flags=re.DOTALL)
     text_content = re.sub(r'<thinking>.*?</thinking>', '', text_content, flags=re.DOTALL)
     text_content = re.sub(r'<results>.*?</results>', '', text_content, flags=re.DOTALL)
     text_content = re.sub(r'<results>.*', '', text_content, flags=re.DOTALL)
+    text_content = _TOOL_CALLS_RE.sub('', text_content)
     text_content = re.sub(r'\n\s*\n\s*\n+', '\n\n', text_content)
     return text_content.strip()
 
