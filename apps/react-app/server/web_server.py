@@ -549,6 +549,16 @@ async def call_agent_stream(request: AgentRequest):
                 if ev_type == "response.output_item.done":
                     item = event.get("item")
                     if item:
+                        # Check if this is a status update from the agent
+                        is_status = False
+                        for block in item.get("content") or []:
+                            text = block.get("text", "")
+                            if text.startswith("__STATUS__"):
+                                yield _sse({"type": "status", "content": text[10:]})
+                                is_status = True
+                                break
+                        if is_status:
+                            continue
                         accumulated_output.append(item)
                         if is_new_thread:
                             yield from stream_new_content(item, _sse)

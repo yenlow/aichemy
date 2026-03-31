@@ -147,12 +147,23 @@ class WrappedAgent(ResponsesAgent):
                         # Collect tool calls from intermediate AIMessages
                         if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
                             for tc in msg.tool_calls:
+                                tool_name = tc.get("name", "unknown")
                                 _tool_calls.append({
                                     "call_id": tc.get("id", ""),
-                                    "function_name": tc.get("name", "unknown"),
+                                    "function_name": tool_name,
                                     "parameters": tc.get("args", {}),
                                     "results": None,
                                 })
+                                # Emit a status update so the user sees progress
+                                if tool_name.startswith("transfer_to_"):
+                                    agent_name = tool_name.replace("transfer_to_", "")
+                                    status = f"__STATUS__Routing to {agent_name}..."
+                                else:
+                                    status = f"__STATUS__Calling {tool_name}..."
+                                for item in output_to_responses_items_stream(
+                                    [AIMessage(content=status)]
+                                ):
+                                    yield item
                         # Collect tool results
                         if isinstance(msg, ToolMessage):
                             tc_id = getattr(msg, "tool_call_id", None)
