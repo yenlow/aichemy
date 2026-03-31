@@ -129,22 +129,7 @@ export default function ChatPanel({
             </div>
             <div className="message-content">
               {msg.role === 'assistant' ? (
-                <>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-                  {msg.traceId && (
-                    <div className="trace-id-row">
-                      <a
-                        className="trace-link"
-                        href={`${import.meta.env.VITE_API_URL || ''}/api/trace/${msg.traceId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title={`View trace ${msg.traceId}`}
-                      >
-                        {msg.traceId}
-                      </a>
-                    </div>
-                  )}
-                </>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
               ) : (
                 msg.content
               )}

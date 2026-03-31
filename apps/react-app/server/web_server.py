@@ -976,17 +976,63 @@ def _extract_text_from_trace(trace_dict: dict) -> Optional[str]:
 
 @app.get("/api/tools")
 async def get_tools():
-    """Return available tools grouped by agent, proxied from the agent server."""
+    """Return available tools grouped by agent, proxied from the agent server.
+
+    Remaps backend keys (mcp, chem_utils, drugbank, zinc_molecular_search)
+    to frontend display keys (OpenTargets, PubChem, PubMed, Chem Utils, etc.)
+    and splits combined MCP tools by server.
+    """
     try:
         resp = requests.get(
             f"http://0.0.0.0:{AGENT_PORT}/agent-tools",
             timeout=5,
         )
         if resp.status_code == 200:
-            return resp.json()
+            return _remap_tools_for_ui(resp.json())
     except Exception:
         pass
     return {}
+
+
+# Key mapping from backend agent names to frontend display names
+_TOOLS_KEY_MAP = {
+    "chem_utils": "Chem Utils",
+    "drugbank": "DrugBank",
+    "zinc_molecular_search": "ZINC",
+}
+
+
+def _classify_mcp_tool(tool_name: str, tool_desc: str) -> str:
+    """Classify an MCP tool into its source server based on name and description."""
+    name_lower = tool_name.lower()
+    desc_lower = (tool_desc or "").lower()
+    if "open_targets" in name_lower or "open targets" in desc_lower or "graphql" in name_lower:
+        return "OpenTargets"
+    if ("pubmed" in name_lower or "pubmed" in desc_lower
+            or any(kw in name_lower for kw in (
+                "mesh", "journal", "author", "article", "citation",
+                "trending", "research_trend", "batch_compound",
+            ))):
+        return "PubMed"
+    return "PubChem"
+
+
+def _remap_tools_for_ui(raw: dict) -> dict:
+    """Remap backend tool groups to frontend-expected keys."""
+    result = {}
+    for key, tools in raw.items():
+        if key == "mcp":
+            # Split combined MCP tools by source server
+            for tool in tools:
+                server = _classify_mcp_tool(tool.get("name", ""), tool.get("description", ""))
+                result.setdefault(server, []).append(tool)
+        elif key == "memory":
+            continue  # Memory tools not shown in sidebar
+        elif key in _TOOLS_KEY_MAP:
+            result[_TOOLS_KEY_MAP[key]] = tools
+        else:
+            result[key] = tools
+    return result
 
 # ---------------------------------------------------------------------------
 # Skills – discover, load, and build prompts with skill instructions
