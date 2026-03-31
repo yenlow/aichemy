@@ -78,6 +78,7 @@ class WrappedAgent(ResponsesAgent):
         self,
         request: ResponsesAgentRequest,
     ) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
+        print("[agent-stream] _predict_stream_async ENTERED", flush=True)
         from uuid import uuid4
 
         lakebase_kwargs = dict(
