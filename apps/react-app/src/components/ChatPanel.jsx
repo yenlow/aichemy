@@ -243,7 +243,7 @@ export default function ChatPanel({
       {/* Disclaimer — shown when chat is empty */}
       {messages.length === 0 && (
         <div className="demo-disclaimer">
-          Welcome! This is a demo, not a production application. Initial load may take a few seconds, and responses can take up to a minute. Complex queries may occasionally hit processing limits — try resetting the chat if that happens.
+          <strong>Demo Application</strong> — Welcome! The initial load may take a few seconds, and responses may take up to a minute. If a complex query hits a processing limit, kindly reset the chat and try again!
         </div>
       )}
 
