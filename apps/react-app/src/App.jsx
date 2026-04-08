@@ -269,7 +269,7 @@ export default function App() {
   }
 
   const handleSendMessage = async (prompt, { skillName } = {}) => {
-    if (!prompt.trim() || isLoading) return
+    if (!prompt.trim() || isLoading || !currentProjectId) return
 
     const isNewThread = messages.length === 0
     if (
@@ -406,6 +406,7 @@ export default function App() {
           onReset={handleReset}
           onStop={handleStop}
           isLoading={isLoading}
+          isReady={!!currentProjectId}
           statusMessage={statusMessage}
           statusLog={statusLog}
           chatHistoryRef={chatHistoryRef}
