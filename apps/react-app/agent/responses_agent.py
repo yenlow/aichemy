@@ -100,7 +100,7 @@ class WrappedAgent(ResponsesAgent):
 
             cc_msgs = to_chat_completions_input([i.model_dump() for i in request.input])
             ci = dict(request.custom_inputs or {})
-            recursion_limit = ci.get("recursion_limit", 12)
+            recursion_limit = ci.get("recursion_limit", 15)
             thread_id = ci.get("thread_id", str(uuid4()))
             user_id = get_user_id(request)
 
