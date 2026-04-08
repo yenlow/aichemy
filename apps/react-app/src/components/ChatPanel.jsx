@@ -239,6 +239,14 @@ export default function ChatPanel({
         </div>
       )}
 
+      {/* Disclaimer — shown when chat is empty */}
+      {messages.length === 0 && (
+        <div className="demo-disclaimer">
+          This is a public demo. The app may take up to 10s to load on first visit.
+          Some responses may take up to 1 min to compute.
+        </div>
+      )}
+
       {/* Example Questions — only when no workflow selected and chat is empty */}
       {!selectedWorkflow && messages.length === 0 && (
         <div className="example-questions">

@@ -342,8 +342,7 @@ body {
   background: var(--bg-color);
   border-radius: 8px;
   margin-bottom: 12px;
-  min-height: 400px;
-  max-height: 500px;
+  min-height: 200px;
 }
 
 .chat-message {
@@ -478,6 +477,18 @@ body {
   border-radius: 20px; cursor: pointer; font-size: 14px; font-weight: 500;
 }
 .submit-workflow-btn:hover:not(:disabled) { background: var(--primary-hover); }
+
+/* Demo disclaimer */
+.demo-disclaimer {
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: #6d4c00;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
 
 /* Example pills */
 .example-questions { margin-bottom: 12px; }
