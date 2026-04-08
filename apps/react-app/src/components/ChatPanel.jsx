@@ -43,6 +43,7 @@ export default function ChatPanel({
   skillsEnabled,
   skillFolderByWorkflow,
   workflows,
+  isReady = true,
 }) {
   const [inputValue, setInputValue] = useState('')
   const [workflowInput, setWorkflowInput] = useState('')
@@ -50,7 +51,7 @@ export default function ChatPanel({
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (inputValue.trim() && !isLoading) {
+    if (inputValue.trim() && !isLoading && isReady) {
       onSendMessage(inputValue)
       setInputValue('')
     }
@@ -64,7 +65,7 @@ export default function ChatPanel({
   }
 
   const handleWorkflowSubmit = (prompt) => {
-    if (prompt && !isLoading) {
+    if (prompt && !isLoading && isReady) {
       const skillName = getSkillName()
       onSendMessage(prompt, { skillName })
       setWorkflowInput('')
@@ -73,7 +74,7 @@ export default function ChatPanel({
   }
 
   const handleExampleClick = (question) => {
-    if (!isLoading) {
+    if (!isLoading && isReady) {
       onSendMessage(question)
     }
   }
@@ -257,7 +258,7 @@ export default function ChatPanel({
                 key={idx}
                 className="pill example-pill"
                 onClick={() => handleExampleClick(question)}
-                disabled={isLoading}
+                disabled={isLoading || !isReady}
               >
                 {question}
               </button>
@@ -275,9 +276,9 @@ export default function ChatPanel({
             placeholder="Ask AiChemy anything..."
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            disabled={isLoading}
+            disabled={isLoading || !isReady}
           />
-          <button type="submit" className="send-button" disabled={isLoading || !inputValue.trim()}>
+          <button type="submit" className="send-button" disabled={isLoading || !isReady || !inputValue.trim()}>
             Send
           </button>
         </form>

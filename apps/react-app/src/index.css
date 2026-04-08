@@ -342,7 +342,8 @@ body {
   background: var(--bg-color);
   border-radius: 8px;
   margin-bottom: 12px;
-  min-height: 200px;
+  min-height: 400px;
+  max-height: 650px;
 }
 
 .chat-message {
